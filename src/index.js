@@ -6,7 +6,6 @@ const HISTORY_KEY = "notification-history-v1";
 const SETTINGS_KEY = "monitor-settings-v1";
 const LAST_RUN_KEY = "last-run-v1";
 const LAST_RESULT_KEY = "last-result-v1";
-const ALLOWED_INTERVALS = [1, 3, 6, 12, 24];
 const BATCH_SIZE = 200;
 
 export default {
@@ -35,17 +34,6 @@ export default {
           return json(await getSettings(env));
         }
 
-        if (request.method === "POST" && url.pathname === "/api/settings") {
-          const body = await request.json();
-          const intervalHours = Number(body.intervalHours);
-          if (!ALLOWED_INTERVALS.includes(intervalHours)) {
-            return json({ ok: false, error: "Selecciona un intervalo válido." }, 400);
-          }
-          const settings = { intervalHours, updatedAt: new Date().toISOString() };
-          await env.KV.put(SETTINGS_KEY, JSON.stringify(settings));
-          return json({ ok: true, settings });
-        }
-
         if (request.method === "GET" && url.pathname === "/api/history") {
           const history = await env.KV.get(HISTORY_KEY, "json") || [];
           return json({ history });
@@ -69,28 +57,15 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runScheduledCheck(env));
+    ctx.waitUntil(runCheck(env, { manual: false }));
   }
 };
 
-async function runScheduledCheck(env) {
-  const settings = await getSettings(env);
-  const lastRun = await env.KV.get(LAST_RUN_KEY);
-  const elapsed = lastRun ? Date.now() - new Date(lastRun).getTime() : Infinity;
-  if (elapsed < settings.intervalHours * 60 * 60 * 1000) {
-    console.log("Revisión omitida: todavía no se cumple el intervalo configurado.");
-    return;
-  }
-  await runCheck(env, { manual: false });
-}
-
 async function getSettings(env) {
-  const saved = await env.KV.get(SETTINGS_KEY, "json");
-  const intervalHours = Number(saved?.intervalHours);
   return {
-    intervalHours: ALLOWED_INTERVALS.includes(intervalHours) ? intervalHours : 6,
-    updatedAt: saved?.updatedAt || null,
-    options: ALLOWED_INTERVALS
+    schedule: "8:00 a. m. y 1:00 p. m.",
+    timezone: "America/Monterrey",
+    times: ["08:00", "13:00"]
   };
 }
 
@@ -247,7 +222,7 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin mínimo histórico de Steam: ${withoutHistoricalLow}`,
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Notificaciones nuevas: ${notifications.length}`,
-      `Frecuencia automática: cada ${settings.intervalHours} hora(s).`
+      `Horarios automáticos: 8:00 a. m. y 1:00 p. m. (Monterrey).`
     ].join("\n"));
   }
 
