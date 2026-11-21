@@ -132,7 +132,7 @@ async function runCheck(env) {
         `Juegos en tu wishlist: ${appids.length}`,
         `Juegos identificados en IsThereAnyDeal: ${mapped}`,
         "El monitor quedó activo. Revisará los precios cada seis horas."
-      ].join("\\n")
+      ].join("\n")
     );
     await env.KV.put("telegram-test-sent", new Date().toISOString());
   }
