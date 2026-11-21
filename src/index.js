@@ -121,6 +121,22 @@ async function runCheck(env) {
   // Solo se guarda el estado cuando todas las consultas terminaron correctamente.
   await env.KV.put(STATE_KEY, JSON.stringify(nextState));
 
+  // En la primera ejecución exitosa envía una confirmación única para comprobar Telegram.
+  const testSent = await env.KV.get("telegram-test-sent");
+  if (!testSent) {
+    await sendTelegram(
+      env,
+      [
+        "✅ PRUEBA DE CONFIGURACIÓN COMPLETADA",
+        "Steam Historical Low Notifier pudo consultar Steam e IsThereAnyDeal.",
+        `Juegos en tu wishlist: ${appids.length}`,
+        `Juegos identificados en IsThereAnyDeal: ${mapped}`,
+        "El monitor quedó activo. Revisará los precios cada seis horas."
+      ].join("\\n")
+    );
+    await env.KV.put("telegram-test-sent", new Date().toISOString());
+  }
+
   if (notifications.length > 0) {
     for (const message of chunkMessages(notifications, 3800)) {
       await sendTelegram(env, message);
