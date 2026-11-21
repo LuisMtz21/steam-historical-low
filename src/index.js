@@ -206,8 +206,6 @@ async function runCheck(env, { manual = false } = {}) {
     }
   }
 
-  await env.KV.put(STATE_KEY, JSON.stringify(nextState));
-
   const testSent = await env.KV.get("telegram-test-sent");
   if (!testSent) {
     await sendTelegram(env, [
@@ -223,6 +221,9 @@ async function runCheck(env, { manual = false } = {}) {
   for (const notification of notifications) {
     await sendTelegram(env, formatAlert(notification));
   }
+
+  // Persistimos el estado después de confirmar los envíos para no perder alertas si Telegram falla.
+  await env.KV.put(STATE_KEY, JSON.stringify(nextState));
 
   if (manual) {
     const settings = await getSettings(env);
