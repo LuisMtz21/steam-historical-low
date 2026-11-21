@@ -177,7 +177,7 @@ async function runCheck(env, { manual = false } = {}) {
 
       let type = null;
       if (isAtLow && isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
-      else if (isAtLow && !old?.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
+      else if (isAtLow && old && !old.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
 
       if (type) {
         const notification = {
