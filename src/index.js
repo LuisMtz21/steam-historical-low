@@ -337,7 +337,8 @@ function formatAlert(item) {
     `Precio actual: ${money(item.price)}`,
     `Mínimo histórico Steam México: ${money(item.historicalLow)}`,
     `Descuento: ${item.discountPercent}%`,
-    item.url
+    item.url,
+    `Historial de precios SteamDB México: https://steamdb.info/app/${item.appid}/?cc=mx`
   ].join("\n");
 }
 
