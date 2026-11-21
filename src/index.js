@@ -97,10 +97,10 @@ async function getSettings(env) {
 async function runCheck(env, { manual = false } = {}) {
   requireSecrets(env);
   const startedAt = new Date().toISOString();
-  const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=\${STEAM_ID}`;
+  const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=${STEAM_ID}`;
   const wishlistResponse = await fetch(wishlistUrl);
   if (!wishlistResponse.ok) {
-    throw new Error(`Steam wishlist respondió HTTP \${wishlistResponse.status}`);
+    throw new Error(`Steam wishlist respondió HTTP ${wishlistResponse.status}`);
   }
 
   const wishlistJson = await wishlistResponse.json();
@@ -127,9 +127,9 @@ async function runCheck(env, { manual = false } = {}) {
   for (let offset = 0; offset < appids.length; offset += BATCH_SIZE) {
     const batch = appids.slice(offset, offset + BATCH_SIZE);
     const lookup = await itadPost(
-      `https://api.isthereanydeal.com/lookup/id/shop/\${STEAM_SHOP_ID}/v1`,
+      `https://api.isthereanydeal.com/lookup/id/shop/${STEAM_SHOP_ID}/v1`,
       env,
-      batch.map(appid => `app/\${appid}`)
+      batch.map(appid => `app/${appid}`)
     );
 
     const gameIds = Object.entries(lookup || {})
@@ -140,10 +140,10 @@ async function runCheck(env, { manual = false } = {}) {
     if (gameIds.length === 0) continue;
 
     const ids = gameIds.map(game => game.id);
-    const query = `country=\${COUNTRY}&shops=\${STEAM_SHOP_ID}`;
+    const query = `country=${COUNTRY}&shops=${STEAM_SHOP_ID}`;
     const [overview, storeLows] = await Promise.all([
-      itadPost(`https://api.isthereanydeal.com/games/overview/v2?\${query}`, env, ids),
-      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?\${query}`, env, ids)
+      itadPost(`https://api.isthereanydeal.com/games/overview/v2?${query}`, env, ids),
+      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?${query}`, env, ids)
     ]);
 
     const currentById = new Map((overview?.prices || []).map(row => [row.id, row]));
@@ -173,7 +173,7 @@ async function runCheck(env, { manual = false } = {}) {
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
       const isNewRecord = hasPreviousLow && lowAmount < Number(old.lowAmount) - 0.000001;
       const isAtLow = currentAmount <= lowAmount + 0.000001;
-      const title = currentRow?.title || old?.title || `Steam App \${game.appid}`;
+      const title = currentRow?.title || old?.title || `Steam App ${game.appid}`;
 
       let type = null;
       if (isAtLow && isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
@@ -191,7 +191,7 @@ async function runCheck(env, { manual = false } = {}) {
           currency,
           discountPercent,
           sentAt: new Date().toISOString(),
-          url: `https://store.steampowered.com/app/\${game.appid}/`
+          url: `https://store.steampowered.com/app/${game.appid}/`
         };
         notifications.push(notification);
       }
@@ -211,8 +211,8 @@ async function runCheck(env, { manual = false } = {}) {
     await sendTelegram(env, [
       "✅ CONFIGURACIÓN CONECTADA",
       "Steam e IsThereAnyDeal respondieron correctamente.",
-      `Juegos en tu wishlist: \${appids.length}`,
-      `Juegos identificados: \${mapped}`,
+      `Juegos en tu wishlist: ${appids.length}`,
+      `Juegos identificados: ${mapped}`,
       "El panel de control ya puede ejecutar revisiones manuales."
     ].join("\n"));
     await env.KV.put("telegram-test-sent", new Date().toISOString());
@@ -229,11 +229,11 @@ async function runCheck(env, { manual = false } = {}) {
     const settings = await getSettings(env);
     await sendTelegram(env, [
       "🧪 PRUEBA MANUAL COMPLETADA",
-      `Juegos en wishlist: \${appids.length}`,
-      `Juegos identificados en IsThereAnyDeal: \${mapped}`,
-      `Juegos con precios revisados: \${checked}`,
-      `Notificaciones nuevas: \${notifications.length}`,
-      `Frecuencia automática: cada \${settings.intervalHours} hora(s).`
+      `Juegos en wishlist: ${appids.length}`,
+      `Juegos identificados en IsThereAnyDeal: ${mapped}`,
+      `Juegos con precios revisados: ${checked}`,
+      `Notificaciones nuevas: ${notifications.length}`,
+      `Frecuencia automática: cada ${settings.intervalHours} hora(s).`
     ].join("\n"));
   }
 
@@ -273,13 +273,13 @@ async function itadPost(url, env, body) {
   });
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500);
-    throw new Error(`IsThereAnyDeal respondió HTTP \${response.status}: \${detail}`);
+    throw new Error(`IsThereAnyDeal respondió HTTP ${response.status}: ${detail}`);
   }
   return response.json();
 }
 
 async function sendTelegram(env, text) {
-  const url = `https://api.telegram.org/bot\${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -291,7 +291,7 @@ async function sendTelegram(env, text) {
   });
   const result = await response.json();
   if (!response.ok || !result.ok) {
-    throw new Error(`Telegram no pudo enviar el mensaje: \${JSON.stringify(result).slice(0, 500)}`);
+    throw new Error(`Telegram no pudo enviar el mensaje: ${JSON.stringify(result).slice(0, 500)}`);
   }
 }
 
@@ -302,18 +302,18 @@ function formatAlert(item) {
     maximumFractionDigits: 2
   }).format(value);
   return [
-    `🎮 \${item.type}`,
+    `🎮 ${item.type}`,
     item.title,
-    `Precio actual: \${money(item.price)}`,
-    `Mínimo histórico Steam México: \${money(item.historicalLow)}`,
-    `Descuento: \${item.discountPercent}%`,
+    `Precio actual: ${money(item.price)}`,
+    `Mínimo histórico Steam México: ${money(item.historicalLow)}`,
+    `Descuento: ${item.discountPercent}%`,
     item.url
   ].join("\n");
 }
 
 function requireSecrets(env) {
   for (const name of ["ITAD_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) {
-    if (!env[name]) throw new Error(`Falta configurar el secreto \${name} en Cloudflare.`);
+    if (!env[name]) throw new Error(`Falta configurar el secreto ${name} en Cloudflare.`);
   }
 }
 
