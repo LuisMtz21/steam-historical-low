@@ -173,13 +173,14 @@ async function runCheck(env, { manual = false } = {}) {
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
       const isNewRecord = hasPreviousLow && lowAmount < Number(old.lowAmount) - 0.000001;
       const isAtLow = currentAmount <= lowAmount + 0.000001;
-      const title = currentRow?.title || old?.title || `Steam App ${game.appid}`;
+      let title = currentRow?.title || old?.title || `Steam App ${game.appid}`;
 
       let type = null;
       if (isAtLow && isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
       else if (isAtLow && old && !old.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
 
       if (type) {
+        title = await getSteamAppName(game.appid, title);
         const notification = {
           id: crypto.randomUUID(),
           type,
@@ -292,6 +293,17 @@ async function sendTelegram(env, text) {
   const result = await response.json();
   if (!response.ok || !result.ok) {
     throw new Error(`Telegram no pudo enviar el mensaje: ${JSON.stringify(result).slice(0, 500)}`);
+  }
+}
+
+async function getSteamAppName(appid, fallback) {
+  try {
+    const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=mx&l=spanish");
+    if (!response.ok) return fallback;
+    const data = await response.json();
+    return data?.[String(appid)]?.data?.name || fallback;
+  } catch {
+    return fallback;
   }
 }
 
