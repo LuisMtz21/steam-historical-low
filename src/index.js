@@ -2,31 +2,105 @@ const STEAM_ID = "76561198124362092";
 const STEAM_SHOP_ID = 61;
 const COUNTRY = "MX";
 const STATE_KEY = "wishlist-state-v1";
+const HISTORY_KEY = "notification-history-v1";
+const SETTINGS_KEY = "monitor-settings-v1";
+const LAST_RUN_KEY = "last-run-v1";
+const LAST_RESULT_KEY = "last-result-v1";
+const ALLOWED_INTERVALS = [1, 3, 6, 12, 24];
 const BATCH_SIZE = 200;
 
 export default {
-  async fetch() {
-    return Response.json({
-      ok: true,
-      service: "Steam Historical Low Notifier",
-      schedule: "Cada 6 horas",
-      country: COUNTRY,
-      store: "Steam"
-    });
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try {
+        if (request.method === "GET" && url.pathname === "/api/status") {
+          return json({
+            ok: true,
+            service: "Steam Historical Low Notifier",
+            settings: await getSettings(env),
+            lastRun: await env.KV.get(LAST_RUN_KEY),
+            lastResult: await env.KV.get(LAST_RESULT_KEY, "json"),
+            historyCount: (await env.KV.get(HISTORY_KEY, "json") || []).length,
+            connections: {
+              steam: true,
+              itad: Boolean(env.ITAD_API_KEY),
+              telegram: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
+              storage: Boolean(env.KV)
+            }
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/settings") {
+          return json(await getSettings(env));
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/settings") {
+          const body = await request.json();
+          const intervalHours = Number(body.intervalHours);
+          if (!ALLOWED_INTERVALS.includes(intervalHours)) {
+            return json({ ok: false, error: "Selecciona un intervalo válido." }, 400);
+          }
+          const settings = { intervalHours, updatedAt: new Date().toISOString() };
+          await env.KV.put(SETTINGS_KEY, JSON.stringify(settings));
+          return json({ ok: true, settings });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/history") {
+          const history = await env.KV.get(HISTORY_KEY, "json") || [];
+          return json({ history });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/run") {
+          requireSecrets(env);
+          const result = await runCheck(env, { manual: true });
+          return json({ ok: true, result });
+        }
+
+        return json({ ok: false, error: "Ruta no encontrada." }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ ok: false, error: error.message || "Error inesperado." }, 500);
+      }
+    }
+
+    if (env.ASSETS) return env.ASSETS.fetch(request);
+    return new Response("Steam Historical Low Notifier", { status: 200 });
   },
 
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runCheck(env));
+    ctx.waitUntil(runScheduledCheck(env));
   }
 };
 
-async function runCheck(env) {
-  requireSecrets(env);
+async function runScheduledCheck(env) {
+  const settings = await getSettings(env);
+  const lastRun = await env.KV.get(LAST_RUN_KEY);
+  const elapsed = lastRun ? Date.now() - new Date(lastRun).getTime() : Infinity;
+  if (elapsed < settings.intervalHours * 60 * 60 * 1000) {
+    console.log("Revisión omitida: todavía no se cumple el intervalo configurado.");
+    return;
+  }
+  await runCheck(env, { manual: false });
+}
 
-  const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=${STEAM_ID}`;
+async function getSettings(env) {
+  const saved = await env.KV.get(SETTINGS_KEY, "json");
+  const intervalHours = Number(saved?.intervalHours);
+  return {
+    intervalHours: ALLOWED_INTERVALS.includes(intervalHours) ? intervalHours : 6,
+    updatedAt: saved?.updatedAt || null,
+    options: ALLOWED_INTERVALS
+  };
+}
+
+async function runCheck(env, { manual = false } = {}) {
+  requireSecrets(env);
+  const startedAt = new Date().toISOString();
+  const wishlistUrl = \`https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=\${STEAM_ID}\`;
   const wishlistResponse = await fetch(wishlistUrl);
   if (!wishlistResponse.ok) {
-    throw new Error(`Steam wishlist respondió HTTP ${wishlistResponse.status}`);
+    throw new Error(\`Steam wishlist respondió HTTP \${wishlistResponse.status}\`);
   }
 
   const wishlistJson = await wishlistResponse.json();
@@ -35,41 +109,41 @@ async function runCheck(env) {
     throw new Error("La respuesta de Steam no contiene response.items. Verifica que la lista de deseados sea pública.");
   }
 
-  const appids = [...new Set(items.map(item => String(item.appid)).filter(id => /^\d+$/.test(id)))];
+  const appids = [...new Set(items.map(item => String(item.appid)).filter(id => /^\\d+$/.test(id)))];
   if (appids.length === 0) {
-    await sendTelegram(env, "La lista de deseados de Steam está vacía. No hay juegos para revisar.");
-    return;
+    const result = { startedAt, finishedAt: new Date().toISOString(), wishlistGames: 0, gamesMappedToItad: 0, alerts: 0 };
+    await saveRun(env, result);
+    const message = "La lista de deseados de Steam está vacía. No hay juegos para revisar.";
+    await sendTelegram(env, manual ? "🧪 PRUEBA MANUAL COMPLETADA\\n" + message : message);
+    return result;
   }
 
   const previousState = await env.KV.get(STATE_KEY, "json") || {};
   const nextState = { ...previousState };
   const notifications = [];
   let mapped = 0;
+  let checked = 0;
 
   for (let offset = 0; offset < appids.length; offset += BATCH_SIZE) {
     const batch = appids.slice(offset, offset + BATCH_SIZE);
     const lookup = await itadPost(
-      `https://api.isthereanydeal.com/lookup/id/shop/${STEAM_SHOP_ID}/v1`,
+      \`https://api.isthereanydeal.com/lookup/id/shop/\${STEAM_SHOP_ID}/v1\`,
       env,
-      batch.map(appid => `app/${appid}`)
+      batch.map(appid => \`app/\${appid}\`)
     );
 
     const gameIds = Object.entries(lookup || {})
       .filter(([, id]) => typeof id === "string" && id.length > 0)
-      .map(([shopGameId, id]) => ({
-        appid: shopGameId.replace(/^app\//, ""),
-        id
-      }));
+      .map(([shopGameId, id]) => ({ appid: shopGameId.replace(/^app\\//, ""), id }));
 
     mapped += gameIds.length;
     if (gameIds.length === 0) continue;
 
     const ids = gameIds.map(game => game.id);
-    const query = `country=${COUNTRY}&shops=${STEAM_SHOP_ID}`;
-
+    const query = \`country=\${COUNTRY}&shops=\${STEAM_SHOP_ID}\`;
     const [overview, storeLows] = await Promise.all([
-      itadPost(`https://api.isthereanydeal.com/games/overview/v2?${query}`, env, ids),
-      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?${query}`, env, ids)
+      itadPost(\`https://api.isthereanydeal.com/games/overview/v2?\${query}\`, env, ids),
+      itadPost(\`https://api.isthereanydeal.com/games/storelow/v2?\${query}\`, env, ids)
     ]);
 
     const currentById = new Map((overview?.prices || []).map(row => [row.id, row]));
@@ -79,33 +153,47 @@ async function runCheck(env) {
       const currentRow = currentById.get(game.id);
       const lowRow = lowById.get(game.id);
       const current = currentRow?.current;
-      const steamLow = lowRow?.lows?.find(low => Number(low.shop?.id) === STEAM_SHOP_ID);
+      const currentPrice = current?.price;
+      const steamLow = lowRow?.lows?.find(low => Number(low.shop?.id ?? low.shop) === STEAM_SHOP_ID);
+      if (!currentPrice || !steamLow?.price) continue;
 
-      if (!current?.price || !steamLow?.price) continue;
-
-      const currentAmount = Number(current.price.amount);
+      const currentAmount = Number(currentPrice.amount);
       const lowAmount = Number(steamLow.price.amount);
-      const currency = current.price.currency || steamLow.price.currency || "MXN";
-
+      const currency = currentPrice.currency || steamLow.price.currency || "MXN";
       if (!Number.isFinite(currentAmount) || !Number.isFinite(lowAmount)) continue;
-      if (current.price.currency && steamLow.price.currency && current.price.currency !== steamLow.price.currency) {
-        console.warn(`Moneda distinta para app/${game.appid}; se omite para evitar comparación incorrecta.`);
-        continue;
-      }
+      if (currentPrice.currency && steamLow.price.currency && currentPrice.currency !== steamLow.price.currency) continue;
 
+      checked++;
+      const regularAmount = Number(current?.regular?.amount);
+      const discountPercent = Number.isFinite(Number(current?.cut))
+        ? Number(current.cut)
+        : (regularAmount > currentAmount ? Math.round((1 - currentAmount / regularAmount) * 100) : 0);
       const key = String(game.appid);
       const old = previousState[key];
-      const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) &&
-        old.lowCurrency === currency;
+      const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
       const isNewRecord = hasPreviousLow && lowAmount < Number(old.lowAmount) - 0.000001;
       const isAtLow = currentAmount <= lowAmount + 0.000001;
+      const title = currentRow?.title || old?.title || \`Steam App \${game.appid}\`;
 
-      let title = currentRow?.title || old?.title || `Steam App ${game.appid}`;
+      let type = null;
+      if (isAtLow && isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
+      else if (isAtLow && !old?.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
 
-      if (isAtLow && isNewRecord) {
-        notifications.push(formatAlert("NUEVO MÍNIMO HISTÓRICO", title, game.appid, currentAmount, lowAmount, currency));
-      } else if (isAtLow && !old?.wasAtLow) {
-        notifications.push(formatAlert("IGUALÓ SU MÍNIMO HISTÓRICO", title, game.appid, currentAmount, lowAmount, currency));
+      if (type) {
+        const notification = {
+          id: crypto.randomUUID(),
+          type,
+          title,
+          appid: game.appid,
+          price: currentAmount,
+          regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
+          historicalLow: lowAmount,
+          currency,
+          discountPercent,
+          sentAt: new Date().toISOString(),
+          url: \`https://store.steampowered.com/app/\${game.appid}/\`
+        };
+        notifications.push(notification);
       }
 
       nextState[key] = {
@@ -118,36 +206,58 @@ async function runCheck(env) {
     }
   }
 
-  // Solo se guarda el estado cuando todas las consultas terminaron correctamente.
   await env.KV.put(STATE_KEY, JSON.stringify(nextState));
 
-  // En la primera ejecución exitosa envía una confirmación única para comprobar Telegram.
   const testSent = await env.KV.get("telegram-test-sent");
   if (!testSent) {
-    await sendTelegram(
-      env,
-      [
-        "✅ PRUEBA DE CONFIGURACIÓN COMPLETADA",
-        "Steam Historical Low Notifier pudo consultar Steam e IsThereAnyDeal.",
-        `Juegos en tu wishlist: ${appids.length}`,
-        `Juegos identificados en IsThereAnyDeal: ${mapped}`,
-        "El monitor quedó activo. Revisará los precios cada seis horas."
-      ].join("\n")
-    );
+    await sendTelegram(env, [
+      "✅ CONFIGURACIÓN CONECTADA",
+      "Steam e IsThereAnyDeal respondieron correctamente.",
+      \`Juegos en tu wishlist: \${appids.length}\`,
+      \`Juegos identificados: \${mapped}\`,
+      "El panel de control ya puede ejecutar revisiones manuales."
+    ].join("\\n"));
     await env.KV.put("telegram-test-sent", new Date().toISOString());
   }
 
-  if (notifications.length > 0) {
-    for (const message of chunkMessages(notifications, 3800)) {
-      await sendTelegram(env, message);
-    }
+  for (const notification of notifications) {
+    await sendTelegram(env, formatAlert(notification));
   }
 
-  console.log(JSON.stringify({
+  if (manual) {
+    const settings = await getSettings(env);
+    await sendTelegram(env, [
+      "🧪 PRUEBA MANUAL COMPLETADA",
+      \`Juegos en wishlist: \${appids.length}\`,
+      \`Juegos identificados en IsThereAnyDeal: \${mapped}\`,
+      \`Juegos con precios revisados: \${checked}\`,
+      \`Notificaciones nuevas: \${notifications.length}\`,
+      \`Frecuencia automática: cada \${settings.intervalHours} hora(s).\`
+    ].join("\\n"));
+  }
+
+  if (notifications.length) {
+    const history = await env.KV.get(HISTORY_KEY, "json") || [];
+    await env.KV.put(HISTORY_KEY, JSON.stringify([...notifications, ...history].slice(0, 500)));
+  }
+
+  const result = {
+    startedAt,
+    finishedAt: new Date().toISOString(),
     wishlistGames: appids.length,
     gamesMappedToItad: mapped,
-    alerts: notifications.length
-  }));
+    gamesChecked: checked,
+    alerts: notifications.length,
+    manual
+  };
+  await saveRun(env, result);
+  console.log(JSON.stringify(result));
+  return result;
+}
+
+async function saveRun(env, result) {
+  await env.KV.put(LAST_RUN_KEY, result.finishedAt);
+  await env.KV.put(LAST_RESULT_KEY, JSON.stringify(result));
 }
 
 async function itadPost(url, env, body) {
@@ -160,17 +270,15 @@ async function itadPost(url, env, body) {
     },
     body: JSON.stringify(body)
   });
-
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500);
-    throw new Error(`IsThereAnyDeal respondió HTTP ${response.status}: ${detail}`);
+    throw new Error(\`IsThereAnyDeal respondió HTTP \${response.status}: \${detail}\`);
   }
-
   return response.json();
 }
 
 async function sendTelegram(env, text) {
-  const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const url = \`https://api.telegram.org/bot\${env.TELEGRAM_BOT_TOKEN}/sendMessage\`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -180,47 +288,37 @@ async function sendTelegram(env, text) {
       disable_web_page_preview: true
     })
   });
-
   const result = await response.json();
   if (!response.ok || !result.ok) {
-    throw new Error(`Telegram no pudo enviar el mensaje: ${JSON.stringify(result).slice(0, 500)}`);
+    throw new Error(\`Telegram no pudo enviar el mensaje: \${JSON.stringify(result).slice(0, 500)}\`);
   }
 }
 
-function formatAlert(type, title, appid, current, low, currency) {
-  const format = value => new Intl.NumberFormat("es-MX", {
+function formatAlert(item) {
+  const money = value => new Intl.NumberFormat("es-MX", {
     style: "currency",
-    currency,
+    currency: item.currency,
     maximumFractionDigits: 2
   }).format(value);
-
   return [
-    `🎮 ${type}`,
-    title,
-    `Precio actual: ${format(current)}`,
-    `Mínimo histórico Steam México: ${format(low)}`,
-    `https://store.steampowered.com/app/${appid}/`
-  ].join("\n");
-}
-
-function chunkMessages(messages, maxLength) {
-  const chunks = [];
-  let current = "";
-  for (const message of messages) {
-    const addition = current ? `\n\n──────────\n\n${message}` : message;
-    if (current.length + addition.length > maxLength) {
-      if (current) chunks.push(current);
-      current = message;
-    } else {
-      current += addition;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
+    \`🎮 \${item.type}\`,
+    item.title,
+    \`Precio actual: \${money(item.price)}\`,
+    \`Mínimo histórico Steam México: \${money(item.historicalLow)}\`,
+    \`Descuento: \${item.discountPercent}%\`,
+    item.url
+  ].join("\\n");
 }
 
 function requireSecrets(env) {
   for (const name of ["ITAD_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) {
-    if (!env[name]) throw new Error(`Falta configurar el secreto ${name} en Cloudflare.`);
+    if (!env[name]) throw new Error(\`Falta configurar el secreto \${name} en Cloudflare.\`);
   }
+}
+
+function json(data, status = 200) {
+  return Response.json(data, {
+    status,
+    headers: { "Cache-Control": "no-store" }
+  });
 }
