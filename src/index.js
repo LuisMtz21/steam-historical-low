@@ -165,7 +165,8 @@ async function runCheck(env, { manual = false } = {}) {
       else if (isAtLow && old && !old.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
 
       if (type) {
-        title = await getSteamAppName(game.appid, title);
+        const steamData = await getSteamAppData(game.appid, title);
+        title = steamData.name;
         const notification = {
           id: crypto.randomUUID(),
           type,
@@ -176,6 +177,7 @@ async function runCheck(env, { manual = false } = {}) {
           historicalLow: lowAmount,
           currency,
           discountPercent,
+          cover: steamData.cover,
           sentAt: new Date().toISOString(),
           url: `https://store.steampowered.com/app/${game.appid}/`
         };
@@ -204,8 +206,10 @@ async function runCheck(env, { manual = false } = {}) {
     await env.KV.put("telegram-test-sent", new Date().toISOString());
   }
 
+  notifications.sort((a, b) => b.discountPercent - a.discountPercent);
+
   for (const notification of notifications) {
-    await sendTelegram(env, formatAlert(notification));
+    await sendTelegramPhoto(env, notification);
   }
 
   // Persistimos el estado después de confirmar los envíos para no perder alertas si Telegram falla.
@@ -271,7 +275,7 @@ async function itadPost(url, env, body) {
 }
 
 async function sendTelegram(env, text) {
-  const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const url = "https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage";
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -283,18 +287,41 @@ async function sendTelegram(env, text) {
   });
   const result = await response.json();
   if (!response.ok || !result.ok) {
-    throw new Error(`Telegram no pudo enviar el mensaje: ${JSON.stringify(result).slice(0, 500)}`);
+    throw new Error("Telegram no pudo enviar el mensaje: " + JSON.stringify(result).slice(0, 500));
   }
 }
 
-async function getSteamAppName(appid, fallback) {
+async function sendTelegramPhoto(env, item) {
+  const url = "https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendPhoto";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: env.TELEGRAM_CHAT_ID,
+      photo: item.cover,
+      caption: formatAlert(item)
+    })
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    console.warn("No se pudo enviar la portada; se enviará el aviso como texto.", result);
+    await sendTelegram(env, formatAlert(item));
+  }
+}
+
+async function getSteamAppData(appid, fallback) {
+  const defaultCover = "https://cdn.akamai.steamstatic.com/steam/apps/" + appid + "/header.jpg";
   try {
     const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=mx&l=spanish");
-    if (!response.ok) return fallback;
+    if (!response.ok) return { name: fallback, cover: defaultCover };
     const data = await response.json();
-    return data?.[String(appid)]?.data?.name || fallback;
+    const game = data?.[String(appid)]?.data;
+    return {
+      name: game?.name || fallback,
+      cover: game?.header_image || defaultCover
+    };
   } catch {
-    return fallback;
+    return { name: fallback, cover: defaultCover };
   }
 }
 
