@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "steam-historical-low",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-21",
+  "workers_dev": true,
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "ea12ecc249ca47e98ae5c414aac2e3af"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
+}
