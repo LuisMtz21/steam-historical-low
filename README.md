@@ -1,23 +1,33 @@
 # Steam Historical Low Notifier
 
-Cloudflare Worker que revisa la lista pública de deseados de Steam México cada 6 horas y envía alertas por Telegram cuando un juego iguala o establece un nuevo mínimo histórico en Steam México.
+Panel web para monitorear la lista pública de deseados de Steam México y recibir notificaciones por Telegram cuando un juego iguala o establece un nuevo mínimo histórico en Steam México.
 
-## Qué hace
+## Panel de control
+
+La página principal del Worker incluye:
+
+- **Probar ahora:** ejecuta una revisión inmediata de Steam e IsThereAnyDeal y envía un resumen de la prueba por Telegram.
+- **Periodo de búsqueda:** permite seleccionar cada 1, 3, 6, 12 o 24 horas.
+- **Historial:** conserva hasta 500 notificaciones enviadas, con fecha, juego, precio actual, mínimo histórico y porcentaje de descuento.
+- **Estado:** muestra la configuración de las conexiones y los resultados de la última revisión.
+
+No requiere contraseña. Cualquier persona que tenga la URL pública del Worker puede abrir el panel, cambiar la frecuencia, consultar el historial y ejecutar una prueba. No se muestran las claves de API ni el token del bot.
+
+## Cómo funciona la frecuencia
+
+Cloudflare ejecuta el Worker una vez por hora. El monitor consulta el intervalo guardado en KV y solo realiza la búsqueda cuando corresponde. El botón **Probar ahora** fuerza una revisión inmediata sin modificar el periodo configurado.
+
+## Qué hace el monitor
 
 - Lee la wishlist pública de Steam.
 - Convierte los Steam AppID a identificadores de IsThereAnyDeal.
-- Consulta precio actual y mínimo histórico exclusivamente de la tienda Steam y el país México.
-- Envía dos tipos de aviso:
-  - **IGUALÓ SU MÍNIMO HISTÓRICO:** el precio actual alcanza un mínimo ya registrado.
-  - **NUEVO MÍNIMO HISTÓRICO:** el mínimo histórico bajó respecto a la revisión anterior y el precio actual está en ese mínimo.
-- Guarda el estado en Cloudflare KV para no repetir avisos cada seis horas mientras el mismo descuento siga activo.
+- Consulta precios y mínimos históricos exclusivamente para Steam y México.
+- Envía alertas de dos tipos:
+  - **IGUALÓ SU MÍNIMO HISTÓRICO:** el precio actual alcanza un mínimo histórico que ya se conocía.
+  - **NUEVO MÍNIMO HISTÓRICO:** IsThereAnyDeal registra un mínimo menor al que se tenía guardado y el precio actual está en ese mínimo.
+- Guarda el estado y el historial en Cloudflare KV para evitar avisos repetidos.
 
-## Requisitos
-
-- Cloudflare Workers con Cron Triggers y KV.
-- Clave de API de IsThereAnyDeal y autorización para este uso.
-- Bot de Telegram y Chat ID.
-- Wishlist de Steam pública.
+El porcentaje de descuento se toma del campo de descuento que devuelve IsThereAnyDeal para el precio actual de Steam.
 
 ## Configuración en Cloudflare
 
@@ -33,35 +43,30 @@ No guardes estos valores en GitHub.
 
 ### 2. KV
 
-El archivo `wrangler.jsonc` ya contiene el binding `KV` y el ID del namespace proporcionado para este proyecto.
+El archivo `wrangler.jsonc` utiliza el namespace existente mediante el binding `KV`.
 
 ### 3. Workers Builds
 
-Configuración esperada:
-
 - Repositorio: `LuisMtz21/steam-historical-low`
-- Rama de producción: `main`
+- Rama: `main`
 - Directorio raíz: `/`
-- Comando de compilación: vacío
 - Comando de despliegue: `npx wrangler deploy`
+
+Los archivos estáticos del panel están en `public/`.
 
 ### 4. Cron
 
-El Worker incluye `0 */6 * * *`: se ejecuta a las 00:00, 06:00, 12:00 y 18:00 UTC. Cloudflare interpreta los Cron Triggers en UTC.
+El Cron configurado es `0 * * * *` (una vez por hora, en UTC). La frecuencia efectiva se controla desde el panel y se almacena en KV.
 
 ## Primera ejecución
 
-La primera revisión crea una línea base en KV y no manda avisos por descuentos que ya estaban activos antes de instalar el monitor. Después notificará cuando un juego entre en su mínimo histórico o cuando ese mínimo se reduzca.
-
-Para probar, puedes ejecutar una vez el Worker desde la opción **Triggers → Cron Triggers → Trigger** en el panel de Cloudflare. La ejecución programada usará los mismos secretos y binding KV.
-
-La URL pública del Worker responde únicamente con información básica de estado; no expone un endpoint para ejecutar revisiones manuales.
+La primera revisión crea la línea base del monitor. No envía alertas por descuentos que ya estaban activos antes de instalarlo. El panel permite ejecutar una prueba manual cuando quieras.
 
 ## Notas
 
-- El país consultado es `MX` y la tienda es Steam (shop ID 61 de IsThereAnyDeal).
-- La comparación se realiza usando la moneda devuelta por la API; si las monedas no coinciden, el juego se omite para evitar comparaciones incorrectas.
-- No se envían alertas repetidas mientras el precio permanezca en el mismo mínimo.
-- IsThereAnyDeal puede no tener identificado algún AppID; esos juegos se omiten.
-- Las revisiones se hacen cada seis horas; no son alertas instantáneas.
-- Este proyecto no está afiliado a Steam ni a IsThereAnyDeal. Consulta y respeta las condiciones de uso de sus servicios.
+- País consultado: `MX`.
+- Tienda consultada: Steam (shop ID 61 de IsThereAnyDeal).
+- Las comparaciones se hacen en la moneda devuelta por la API; si las monedas no coinciden, el juego se omite.
+- Los juegos que IsThereAnyDeal no identifica se omiten.
+- El historial conserva las últimas 500 notificaciones.
+- El proyecto no está afiliado a Steam ni a IsThereAnyDeal. Consulta y respeta las condiciones de uso de sus servicios.
