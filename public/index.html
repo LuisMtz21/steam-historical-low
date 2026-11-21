@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827">
+<title>Steam Historical Low · Panel</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1120;--panel:#121c2e;--panel2:#172338;--line:#26364e;--muted:#91a2bb;--text:#edf3fc;--blue:#70a7ff;--green:#49d6a0;--red:#ff7d88;--yellow:#f5c96a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 10% 0%,#172b49 0,transparent 42%),var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1180px;margin:auto;padding:32px 22px 60px}.top{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:28px}.brand{display:flex;align-items:center;gap:14px}.logo{width:48px;height:48px;border-radius:15px;background:#1d3557;display:grid;place-items:center;font-size:25px}.eyebrow{color:var(--blue);font-size:11px;letter-spacing:.15em;text-transform:uppercase;font-weight:800}.top h1{font-size:23px;letter-spacing:-.04em;margin:2px 0 0}.muted{color:var(--muted)}.status{display:flex;align-items:center;gap:9px;padding:9px 13px;border:1px solid var(--line);border-radius:99px;color:var(--muted);font-size:13px}.dot{width:8px;height:8px;border-radius:50%;background:var(--yellow);box-shadow:0 0 12px currentColor}.dot.ok{background:var(--green)}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}.card{background:linear-gradient(145deg,rgba(23,35,56,.96),rgba(16,27,44,.96));border:1px solid var(--line);border-radius:17px;padding:19px;box-shadow:0 12px 35px #0002}.stat-label{font-size:12px;color:var(--muted);margin-bottom:8px}.stat-value{font-size:27px;font-weight:750;letter-spacing:-.04em}.stat-foot{font-size:12px;color:var(--muted);margin-top:4px}.main-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;margin-bottom:18px}.section-title{font-size:16px;font-weight:700;margin:0 0 4px}.section-sub{font-size:13px;color:var(--muted);margin:0 0 18px}.run-card{display:flex;flex-direction:column;justify-content:space-between;min-height:220px}.run-row{display:flex;align-items:center;gap:15px;flex-wrap:wrap}.primary{border:0;background:linear-gradient(135deg,#4c91ff,#3974dc);color:white;font-weight:750;padding:13px 20px;border-radius:11px;cursor:pointer;box-shadow:0 8px 24px #3974dc44}.primary:hover{filter:brightness(1.08)}.primary:disabled{opacity:.55;cursor:wait}.run-note{font-size:12px;color:var(--muted)}.result{margin-top:17px;padding:12px 14px;border-radius:10px;background:#0b1525;border:1px solid var(--line);font-size:13px;color:var(--muted);min-height:44px}.settings{display:flex;flex-direction:column;justify-content:space-between}.select-row{display:flex;gap:10px;align-items:center}.select-row select{background:#0c1728;color:var(--text);border:1px solid var(--line);padding:12px;border-radius:10px;min-width:0;flex:1}.save{padding:12px 15px;border:1px solid #385783;background:#1d3658;color:#dceaff;border-radius:10px;font-weight:700;cursor:pointer}.connections{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}.chip{display:flex;align-items:center;gap:7px;background:#0d192a;border:1px solid var(--line);border-radius:99px;padding:6px 10px;font-size:12px;color:var(--muted)}.chip .dot{width:6px;height:6px}.history{padding:0;overflow:hidden}.history-head{padding:20px 20px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px}.history-head h2{font-size:16px;margin:0}.history-head span{font-size:12px;color:var(--muted)}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:13px 17px;border-top:1px solid var(--line);font-size:13px}th{font-size:11px;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.06em;background:#0d1829}td.game{font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis}td a{color:inherit;text-decoration:none}td a:hover{color:var(--blue)}.type{display:inline-flex;padding:5px 8px;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:.025em}.type.new{background:#173d35;color:#72e4b9}.type.equal{background:#392f1c;color:#f4d17a}.discount{color:var(--green);font-weight:800}.empty{padding:35px 15px;text-align:center;color:var(--muted);font-size:13px}.footer{display:flex;justify-content:space-between;gap:12px;margin-top:15px;color:#71839d;font-size:11px}.toast{position:fixed;right:22px;bottom:22px;background:#17263c;border:1px solid #3b5475;padding:12px 16px;border-radius:11px;box-shadow:0 12px 40px #0008;display:none;max-width:360px;font-size:13px}.toast.show{display:block}
+@media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.main-grid{grid-template-columns:1fr}}@media(max-width:520px){.wrap{padding:22px 13px 45px}.top{align-items:flex-start;flex-direction:column}.top h1{font-size:20px}.grid{gap:9px}.card{padding:15px}.stat-value{font-size:23px}.select-row{align-items:stretch;flex-direction:column}.save{width:100%}.footer{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+ <div class="brand"><div class="logo">🎮</div><div><div class="eyebrow">Steam · México</div><h1>Historical Low Notifier</h1></div></div>
+ <div class="status"><span class="dot" id="mainDot"></span><span id="mainStatus">Conectando con el monitor…</span></div>
+</header>
+<section class="grid">
+ <div class="card"><div class="stat-label">Juegos en wishlist</div><div class="stat-value" id="wishlistCount">—</div><div class="stat-foot">Lista pública de Steam</div></div>
+ <div class="card"><div class="stat-label">Juegos identificados</div><div class="stat-value" id="mappedCount">—</div><div class="stat-foot">En IsThereAnyDeal</div></div>
+ <div class="card"><div class="stat-label">Notificaciones guardadas</div><div class="stat-value" id="historyCount">—</div><div class="stat-foot">Historial de alertas</div></div>
+ <div class="card"><div class="stat-label">Frecuencia automática</div><div class="stat-value" id="intervalLabel">6 h</div><div class="stat-foot">Entre revisiones de precios</div></div>
+</section>
+<section class="main-grid">
+ <div class="card run-card">
+  <div><h2 class="section-title">Prueba de búsqueda</h2><p class="section-sub">Ejecuta una revisión de tu lista de deseados ahora mismo, sin esperar al siguiente horario.</p></div>
+  <div><div class="run-row"><button class="primary" id="runButton" onclick="runNow()">▶ Probar ahora</button><span class="run-note">También recibirás un resumen por Telegram.</span></div><div class="result" id="runResult">La última ejecución aparecerá aquí.</div></div>
+ </div>
+ <div class="card settings">
+  <div><h2 class="section-title">Periodo de búsqueda</h2><p class="section-sub">Elige cada cuánto revisar automáticamente los precios.</p></div>
+  <div class="select-row"><select id="intervalSelect"><option value="1">Cada hora</option><option value="3">Cada 3 horas</option><option value="6">Cada 6 horas</option><option value="12">Cada 12 horas</option><option value="24">Cada 24 horas</option></select><button class="save" onclick="saveSettings()">Guardar</button></div>
+  <div class="connections" id="connections"><span class="chip"><i class="dot"></i> Cargando conexiones</span></div>
+ </div>
+</section>
+<section class="card history">
+ <div class="history-head"><div><h2>Historial de notificaciones</h2><span>Alertas enviadas por Telegram con precios de Steam México</span></div><span id="historyUpdated">—</span></div>
+ <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Juego</th><th>Tipo de alerta</th><th>Precio actual</th><th>Mínimo histórico</th><th>Descuento</th></tr></thead><tbody id="historyBody"><tr><td colspan="6" class="empty">Cargando historial…</td></tr></tbody></table></div>
+</section>
+<div class="footer"><span>Steam Historical Low Notifier · Cloudflare Workers</span><span>Precios en MXN cuando la API los proporciona.</span></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+const money=(n,c="MXN")=>new Intl.NumberFormat("es-MX",{style:"currency",currency:c,maximumFractionDigits:2}).format(Number(n)||0);
+const date=v=>v?new Intl.DateTimeFormat("es-MX",{dateStyle:"medium",timeStyle:"short"}).format(new Date(v)):"—";
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const data=await r.json();if(!r.ok||data.ok===false)throw new Error(data.error||"No se pudo completar la solicitud.");return data}
+function toast(message){$("toast").textContent=message;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),3500)}
+function setDot(el,ok){$(el).className=ok?"dot ok":"dot"}
+async function loadStatus(){try{const s=await api("/api/status");const last=s.lastResult||{};$("mainStatus").textContent="Monitor conectado";setDot("mainDot",true);$("wishlistCount").textContent=last.wishlistGames??"—";$("mappedCount").textContent=last.gamesMappedToItad??"—";$("historyCount").textContent=s.historyCount??0;$("intervalLabel").textContent=s.settings.intervalHours+" h";$("intervalSelect").value=String(s.settings.intervalHours);$("connections").innerHTML=[["Steam",s.connections.steam],["IsThereAnyDeal",s.connections.itad],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");if(s.lastRun)$("runResult").textContent="Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas."}catch(e){$("mainStatus").textContent="No se pudo conectar";setDot("mainDot",false);$("runResult").textContent=e.message}}
+async function loadHistory(){try{const data=await api("/api/history");const rows=data.history||[];$("historyCount").textContent=rows.length;$("historyUpdated").textContent=rows.length?"Última alerta: "+date(rows[0].sentAt):"Sin notificaciones";if(!rows.length){$("historyBody").innerHTML='<tr><td colspan="6" class="empty">Todavía no se han enviado notificaciones. Cuando un juego alcance su mínimo histórico aparecerá aquí.</td></tr>';return}$("historyBody").innerHTML=rows.map(x=>'<tr><td>'+date(x.sentAt)+'</td><td class="game"><a href="'+x.url+'" target="_blank" rel="noopener">'+escapeHtml(x.title)+'</a></td><td><span class="type '+(x.type.includes("NUEVO")?"new":"equal")+'">'+(x.type.includes("NUEVO")?"NUEVO MÍNIMO":"IGUALÓ MÍNIMO")+'</span></td><td>'+money(x.price,x.currency)+'</td><td>'+money(x.historicalLow,x.currency)+'</td><td class="discount">'+(x.discountPercent??0)+'%</td></tr>').join("")}catch(e){$("historyBody").innerHTML='<tr><td colspan="6" class="empty">'+escapeHtml(e.message)+'</td></tr>'}}
+function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function saveSettings(){const intervalHours=Number($("intervalSelect").value);try{await api("/api/settings",{method:"POST",body:JSON.stringify({intervalHours})});$("intervalLabel").textContent=intervalHours+" h";toast("Frecuencia guardada: cada "+intervalHours+" hora(s).")}catch(e){toast(e.message)}}
+async function runNow(){const b=$("runButton");b.disabled=true;b.textContent="Revisando wishlist…";$("runResult").textContent="Consultando Steam e IsThereAnyDeal. Puede tardar unos momentos.";try{const data=await api("/api/run",{method:"POST"});const r=data.result;$("runResult").textContent="Prueba completada: "+r.wishlistGames+" juegos en wishlist, "+r.gamesMappedToItad+" identificados, "+r.gamesChecked+" revisados y "+r.alerts+" alertas nuevas. Resumen enviado por Telegram." ;toast("Revisión completada correctamente.");await Promise.all([loadStatus(),loadHistory()])}catch(e){$("runResult").textContent="Error: "+e.message;toast(e.message)}finally{b.disabled=false;b.textContent="▶ Probar ahora"}}
+loadStatus();loadHistory();setInterval(()=>{loadStatus();loadHistory()},60000);
+</script>
+</body>
+</html>
