@@ -123,6 +123,9 @@ async function runCheck(env, { manual = false } = {}) {
   const notifications = [];
   let mapped = 0;
   let checked = 0;
+  let withoutCurrentPrice = 0;
+  let withoutHistoricalLow = 0;
+  let withoutBothPrices = 0;
 
   for (let offset = 0; offset < appids.length; offset += BATCH_SIZE) {
     const batch = appids.slice(offset, offset + BATCH_SIZE);
@@ -155,7 +158,14 @@ async function runCheck(env, { manual = false } = {}) {
       const current = currentRow?.current;
       const currentPrice = current?.price;
       const steamLow = lowRow?.lows?.find(low => Number(low.shop?.id ?? low.shop) === STEAM_SHOP_ID);
-      if (!currentPrice || !steamLow?.price) continue;
+      const hasCurrentPrice = Boolean(currentPrice);
+      const hasHistoricalLow = Boolean(steamLow?.price);
+      if (!hasCurrentPrice || !hasHistoricalLow) {
+        if (!hasCurrentPrice && !hasHistoricalLow) withoutBothPrices++;
+        else if (!hasCurrentPrice) withoutCurrentPrice++;
+        else withoutHistoricalLow++;
+        continue;
+      }
 
       const currentAmount = Number(currentPrice.amount);
       const lowAmount = Number(steamLow.price.amount);
@@ -232,7 +242,10 @@ async function runCheck(env, { manual = false } = {}) {
       "🧪 PRUEBA MANUAL COMPLETADA",
       `Juegos en wishlist: ${appids.length}`,
       `Juegos identificados en IsThereAnyDeal: ${mapped}`,
-      `Juegos con precios revisados: ${checked}`,
+      `Juegos con precios comparables revisados: ${checked}`,
+      `Sin precio actual: ${withoutCurrentPrice}`,
+      `Sin mínimo histórico de Steam: ${withoutHistoricalLow}`,
+      `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Notificaciones nuevas: ${notifications.length}`,
       `Frecuencia automática: cada ${settings.intervalHours} hora(s).`
     ].join("\n"));
@@ -249,6 +262,9 @@ async function runCheck(env, { manual = false } = {}) {
     wishlistGames: appids.length,
     gamesMappedToItad: mapped,
     gamesChecked: checked,
+    withoutCurrentPrice,
+    withoutHistoricalLow,
+    withoutBothPrices,
     alerts: notifications.length,
     manual
   };
