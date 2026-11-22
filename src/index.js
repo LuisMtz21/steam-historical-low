@@ -292,37 +292,47 @@ async function sendTelegram(env, text) {
 }
 
 async function sendTelegramPhoto(env, item) {
-  const url = "https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendPhoto";
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: env.TELEGRAM_CHAT_ID,
-      photo: item.cover,
-      caption: formatAlert(item)
-    })
-  });
-  const result = await response.json();
-  if (!response.ok || !result.ok) {
-    console.warn("No se pudo enviar la portada; se enviará el aviso como texto.", result);
+  const telegramUrl = "https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendPhoto";
+  try {
+    const imageResponse = await fetch(item.cover);
+    if (!imageResponse.ok) throw new Error("Steam CDN respondió HTTP " + imageResponse.status);
+    const imageBlob = await imageResponse.blob();
+    const form = new FormData();
+    form.append("chat_id", env.TELEGRAM_CHAT_ID);
+    form.append("photo", imageBlob, "steam-cover.jpg");
+    form.append("caption", formatAlert(item));
+    const response = await fetch(telegramUrl, { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(JSON.stringify(result).slice(0, 500));
+  } catch (error) {
+    console.warn("No se pudo enviar la portada; se enviará el aviso como texto.", error);
     await sendTelegram(env, formatAlert(item));
   }
 }
 
 async function getSteamAppData(appid, fallback) {
-  const defaultCover = "https://cdn.akamai.steamstatic.com/steam/apps/" + appid + "/header.jpg";
-  try {
-    const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=mx&l=spanish");
-    if (!response.ok) return { name: fallback, cover: defaultCover };
-    const data = await response.json();
-    const game = data?.[String(appid)]?.data;
-    return {
-      name: game?.name || fallback,
-      cover: game?.header_image || defaultCover
-    };
-  } catch {
-    return { name: fallback, cover: defaultCover };
+  const defaultCover = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + appid + "/header.jpg";
+  // Steam has moved some newer game artwork into hash-based asset paths.
+  const knownCoverFallbacks = {
+    "2069250": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2069250/14a0a45da992ca33d59eb318b5cb9598c070e1c1/header.jpg"
+  };
+  for (const country of ["mx", "us"]) {
+    try {
+      const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=" + country + "&l=spanish");
+      if (!response.ok) continue;
+      const data = await response.json();
+      const game = data?.[String(appid)]?.data;
+      if (game) {
+        return {
+          name: game.name || fallback,
+          cover: game.header_image || knownCoverFallbacks[String(appid)] || defaultCover
+        };
+      }
+    } catch {
+      // Try the next Steam region before using a fallback image URL.
+    }
   }
+  return { name: fallback, cover: knownCoverFallbacks[String(appid)] || defaultCover };
 }
 
 function formatAlert(item) {
