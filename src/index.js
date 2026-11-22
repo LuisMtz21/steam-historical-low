@@ -178,6 +178,8 @@ async function runCheck(env, { manual = false } = {}) {
           currency,
           discountPercent,
           cover: steamData.cover,
+          coverCandidates: steamData.coverCandidates,
+          discountExpiration: steamData.discountExpiration,
           sentAt: new Date().toISOString(),
           url: `https://store.steampowered.com/app/${game.appid}/`
         };
@@ -293,46 +295,75 @@ async function sendTelegram(env, text) {
 
 async function sendTelegramPhoto(env, item) {
   const telegramUrl = "https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendPhoto";
-  try {
-    const imageResponse = await fetch(item.cover);
-    if (!imageResponse.ok) throw new Error("Steam CDN respondió HTTP " + imageResponse.status);
-    const imageBlob = await imageResponse.blob();
-    const form = new FormData();
-    form.append("chat_id", env.TELEGRAM_CHAT_ID);
-    form.append("photo", imageBlob, "steam-cover.jpg");
-    form.append("caption", formatAlert(item));
-    const response = await fetch(telegramUrl, { method: "POST", body: form });
-    const result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(JSON.stringify(result).slice(0, 500));
-  } catch (error) {
-    console.warn("No se pudo enviar la portada; se enviará el aviso como texto.", error);
-    await sendTelegram(env, formatAlert(item));
+  const candidates = [...new Set([
+    ...(item.coverCandidates || []),
+    item.cover,
+    item.appid === "2069250" ? "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2069250/14a0a45da992ca33d59eb318b5cb9598c070e1c1/header.jpg" : null,
+    "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + item.appid + "/header.jpg",
+    "https://cdn.akamai.steamstatic.com/steam/apps/" + item.appid + "/header.jpg",
+    "https://cdn.cloudflare.steamstatic.com/steam/apps/" + item.appid + "/header.jpg"
+  ].filter(Boolean))];
+  for (const imageUrl of candidates) {
+    try {
+      const imageResponse = await fetch(imageUrl, { headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" } });
+      if (!imageResponse.ok) { console.warn("Portada no disponible", imageUrl, imageResponse.status); continue; }
+      const imageBlob = await imageResponse.blob();
+      if (!imageBlob.type.startsWith("image/") || imageBlob.size < 1000) {
+        console.warn("Steam CDN no devolvió una imagen válida", imageUrl, imageBlob.type, imageBlob.size);
+        continue;
+      }
+      const form = new FormData();
+      form.append("chat_id", env.TELEGRAM_CHAT_ID);
+      form.append("photo", imageBlob, "steam-cover.jpg");
+      form.append("caption", formatAlert(item));
+      const response = await fetch(telegramUrl, { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok || !result.ok) { console.warn("Telegram rechazó la portada", result); continue; }
+      return;
+    } catch (error) { console.warn("Error cargando portada", imageUrl, error); }
   }
+  console.warn("No se encontró una portada; se enviará el aviso como texto.", item.appid);
+  await sendTelegram(env, formatAlert(item));
 }
 
 async function getSteamAppData(appid, fallback) {
   const defaultCover = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + appid + "/header.jpg";
-  // Steam has moved some newer game artwork into hash-based asset paths.
   const knownCoverFallbacks = {
     "2069250": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2069250/14a0a45da992ca33d59eb318b5cb9598c070e1c1/header.jpg"
   };
   for (const country of ["mx", "us"]) {
     try {
-      const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=" + country + "&l=spanish");
+      const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=" + country + "&l=spanish", {
+        headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" }
+      });
       if (!response.ok) continue;
       const data = await response.json();
       const game = data?.[String(appid)]?.data;
-      if (game) {
-        return {
-          name: game.name || fallback,
-          cover: game.header_image || knownCoverFallbacks[String(appid)] || defaultCover
-        };
-      }
+      if (!game) continue;
+      const price = game.price_overview || {};
+      const discountExpiration = price.discount_expiration || game.discount_expiration || null;
+      const knownCover = knownCoverFallbacks[String(appid)];
+      const coverCandidates = [...new Set([
+        game.header_image, game.capsule_image, game.capsule_imagev5,
+        knownCover, defaultCover
+      ].filter(Boolean))];
+      return {
+        name: game.name || fallback,
+        cover: game.header_image || knownCover || defaultCover,
+        coverCandidates,
+        discountExpiration
+      };
     } catch {
       // Try the next Steam region before using a fallback image URL.
     }
   }
-  return { name: fallback, cover: knownCoverFallbacks[String(appid)] || defaultCover };
+  const knownCover = knownCoverFallbacks[String(appid)];
+  return {
+    name: fallback,
+    cover: knownCover || defaultCover,
+    coverCandidates: [knownCover, defaultCover].filter(Boolean),
+    discountExpiration: null
+  };
 }
 
 function formatAlert(item) {
@@ -347,9 +378,25 @@ function formatAlert(item) {
     `Precio actual: ${money(item.price)}`,
     `Mínimo histórico Steam México: ${money(item.historicalLow)}`,
     `Descuento: ${item.discountPercent}%`,
+    `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
     `Historial de precios SteamDB México: https://steamdb.info/app/${item.appid}/?cc=mx`
   ].join("\n");
+}
+
+function formatDiscountExpiration(value) {
+  if (value === null || value === undefined || value === "" || Number(value) === 0) return "Fecha no disponible en Steam";
+  let date;
+  if (typeof value === "number" || /^\d+$/.test(String(value))) {
+    const numeric = Number(value);
+    date = new Date(numeric < 1000000000000 ? numeric * 1000 : numeric);
+  } else {
+    date = new Date(value);
+  }
+  if (!Number.isFinite(date.getTime())) return "Fecha no disponible en Steam";
+  return new Intl.DateTimeFormat("es-MX", {
+    dateStyle: "medium", timeStyle: "short", timeZone: "America/Monterrey"
+  }).format(date) + " (hora Monterrey)";
 }
 
 function requireSecrets(env) {
