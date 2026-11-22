@@ -341,7 +341,10 @@ async function getSteamAppData(appid, fallback) {
       const game = data?.[String(appid)]?.data;
       if (!game) continue;
       const price = game.price_overview || {};
-      const discountExpiration = price.discount_expiration || game.discount_expiration || null;
+      let discountExpiration = price.discount_expiration || game.discount_expiration || null;
+      if (!discountExpiration && Number(price.discount_percent || 0) > 0) {
+        discountExpiration = await getFeaturedDiscountExpiration(appid);
+      }
       const knownCover = knownCoverFallbacks[String(appid)];
       const coverCandidates = [...new Set([
         game.header_image, game.capsule_image, game.capsule_imagev5,
@@ -364,6 +367,38 @@ async function getSteamAppData(appid, fallback) {
     coverCandidates: [knownCover, defaultCover].filter(Boolean),
     discountExpiration: null
   };
+}
+
+async function getFeaturedDiscountExpiration(appid) {
+  try {
+    const response = await fetch("https://store.steampowered.com/api/featuredcategories/?cc=mx&l=spanish", {
+      headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" }
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return findDiscountExpiration(data, String(appid), 0);
+  } catch {
+    return null;
+  }
+}
+
+function findDiscountExpiration(value, appid, depth) {
+  if (!value || typeof value !== "object" || depth > 12) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDiscountExpiration(item, appid, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const itemId = String(value.appid ?? value.id ?? value.app_id ?? "");
+  const expiration = value.discount_expiration ?? value.discountExpiration ?? null;
+  if (itemId === appid && expiration) return expiration;
+  for (const child of Object.values(value)) {
+    const found = findDiscountExpiration(child, appid, depth + 1);
+    if (found) return found;
+  }
+  return null;
 }
 
 function formatAlert(item) {
