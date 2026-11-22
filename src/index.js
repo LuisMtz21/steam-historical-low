@@ -63,9 +63,9 @@ export default {
 
 async function getSettings(env) {
   return {
-    schedule: "8:00 a. m. y 1:00 p. m.",
+    schedule: "8:00 a. m. y 12:05 p. m.",
     timezone: "America/Monterrey",
-    times: ["08:00", "13:00"]
+    times: ["08:00", "12:05"]
   };
 }
 
@@ -96,6 +96,7 @@ async function runCheck(env, { manual = false } = {}) {
   const previousState = await env.KV.get(STATE_KEY, "json") || {};
   const nextState = { ...previousState };
   const notifications = [];
+  const usdToMxn = await getUsdToMxnRate();
   let mapped = 0;
   let checked = 0;
   let withoutCurrentPrice = 0;
@@ -176,6 +177,7 @@ async function runCheck(env, { manual = false } = {}) {
           regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
           historicalLow: lowAmount,
           currency,
+          usdToMxn,
           discountPercent,
           cover: steamData.cover,
           coverCandidates: steamData.coverCandidates,
@@ -228,7 +230,8 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin mínimo histórico de Steam: ${withoutHistoricalLow}`,
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Notificaciones nuevas: ${notifications.length}`,
-      `Horarios automáticos: 8:00 a. m. y 1:00 p. m. (Monterrey).`
+      `Horarios automáticos: 8:00 a. m. y 12:05 p. m. (Monterrey).`,
+      `Tipo de cambio USD/MXN usado para mostrar precios: ${usdToMxn ? usdToMxn.toFixed(4) : "no disponible"}`
     ].join("\n"));
   }
 
@@ -401,22 +404,37 @@ function findDiscountExpiration(value, appid, depth) {
   return null;
 }
 
+async function getUsdToMxnRate() {
+  try {
+    const response = await fetch("https://open.er-api.com/v6/latest/USD");
+    if (!response.ok) return null;
+    const data = await response.json();
+    const rate = Number(data?.rates?.MXN);
+    return Number.isFinite(rate) && rate > 0 ? rate : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatAlert(item) {
-  const money = value => new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: item.currency,
-    maximumFractionDigits: 2
+  const mxn = value => new Intl.NumberFormat("es-MX", {
+    style: "currency", currency: "MXN", maximumFractionDigits: 2
+  }).format(value * (item.currency === "MXN" ? 1 : item.currency === "USD" && item.usdToMxn ? item.usdToMxn : 1));
+  const original = value => new Intl.NumberFormat("es-MX", {
+    style: "currency", currency: item.currency, maximumFractionDigits: 2
   }).format(value);
+  const converted = item.currency !== "MXN" && item.currency === "USD" && item.usdToMxn;
   return [
     `🎮 ${item.type}`,
     item.title,
-    `Precio actual: ${money(item.price)}`,
-    `Mínimo histórico Steam México: ${money(item.historicalLow)}`,
+    `Precio actual: ${mxn(item.price)}${converted ? " ( " + original(item.price) + " )" : ""}`,
+    `Mínimo histórico Steam: ${mxn(item.historicalLow)}${converted ? " ( " + original(item.historicalLow) + " )" : ""}`,
+    converted ? `Conversión aproximada con 1 USD = ${item.usdToMxn.toFixed(4)} MXN` : null,
     `Descuento: ${item.discountPercent}%`,
     `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
     `Historial de precios SteamDB México: https://steamdb.info/app/${item.appid}/?cc=mx`
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function formatDiscountExpiration(value) {
