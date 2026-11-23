@@ -400,9 +400,9 @@ function formatAlert(item) {
   }).format(value);
   const isUsdConverted = item.currency === "USD" && Number.isFinite(item.usdToMxn) && item.usdToMxn > 0;
   const displayPrice = value => {
-    if (item.currency === "MXN") return money(value, "MXN");
-    if (isUsdConverted) return money(value * item.usdToMxn, "MXN") + " ( " + money(value, "USD") + " )";
-    return money(value, item.currency) + " (conversión MXN no disponible)";
+    if (item.currency === "MXN") return "MXN " + money(value, "MXN");
+    if (isUsdConverted) return "MXN " + money(value * item.usdToMxn, "MXN") + " (USD " + money(value, "USD") + ")";
+    return money(value, item.currency) + " (" + item.currency + "; conversión MXN no disponible)";
   };
   return [
     `🎮 ${item.type}`,
