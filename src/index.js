@@ -133,7 +133,6 @@ async function runCheck(env, { manual = false } = {}) {
     ]);
 
     const lowById = new Map((storeLows || []).map(row => [row.id, row]));
-    const lowById = new Map((storeLows || []).map(row => [row.id, row]));
 
     for (const game of gameIds) {
       const lowRow = lowById.get(game.id);
