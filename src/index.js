@@ -108,7 +108,6 @@ async function runCheck(env, { manual = false } = {}) {
   let mapped = 0;
   let checked = 0;
   let withoutCurrentPrice = 0;
-  let withoutHistoricalLow = 0;
   let withoutBothPrices = 0;
 
   for (let offset = 0; offset < appids.length; offset += BATCH_SIZE) {
@@ -238,7 +237,6 @@ async function runCheck(env, { manual = false } = {}) {
       `Juegos identificados en IsThereAnyDeal: ${mapped}`,
       `Juegos con precios comparables revisados: ${checked}`,
       `Sin precio actual: ${withoutCurrentPrice}`,
-      `Sin mínimo histórico de Steam: ${withoutHistoricalLow}`,
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Sin precio regional MXN de Steam: ${withoutMexicanPrice}`,
       `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
