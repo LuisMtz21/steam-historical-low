@@ -21,7 +21,7 @@ export default {
             settings: await getSettings(env),
             lastRun: await env.KV.get(LAST_RUN_KEY),
             lastResult: await env.KV.get(LAST_RESULT_KEY, "json"),
-            historyCount: (await env.KV.get(HISTORY_KEY, "json") || []).length,
+            historyCount: (await env.KV.get(HISTORY_KEY, "json") || []).filter(item => item.currency === "MXN").length,
             connections: {
               steam: true,
               itad: Boolean(env.ITAD_API_KEY),
@@ -36,7 +36,7 @@ export default {
         }
 
         if (request.method === "GET" && url.pathname === "/api/history") {
-          const history = await env.KV.get(HISTORY_KEY, "json") || [];
+          const history = (await env.KV.get(HISTORY_KEY, "json") || []).filter(item => item.currency === "MXN");
           return json({ history });
         }
 
@@ -257,7 +257,6 @@ async function runCheck(env, { manual = false } = {}) {
     gamesMappedToItad: mapped,
     gamesChecked: checked,
     withoutCurrentPrice,
-    withoutHistoricalLow,
     withoutBothPrices,
     withoutMexicanPrice,
     withoutComparableHistoricalLow,
