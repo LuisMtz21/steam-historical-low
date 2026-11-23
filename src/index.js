@@ -7,6 +7,7 @@ const SETTINGS_KEY = "monitor-settings-v1";
 const LAST_RUN_KEY = "last-run-v1";
 const LAST_RESULT_KEY = "last-result-v1";
 const BATCH_SIZE = 200;
+const MAX_ALERTS_PER_RUN = 15;
 
 export default {
   async fetch(request, env, ctx) {
@@ -72,6 +73,12 @@ async function getSettings(env) {
 async function runCheck(env, { manual = false } = {}) {
   requireSecrets(env);
   const startedAt = new Date().toISOString();
+  const lockKey = "run-lock-v1";
+  const lockedAt = await env.KV.get(lockKey);
+  if (lockedAt && Date.now() - Date.parse(lockedAt) < 15 * 60 * 1000) {
+    return { skipped: true, reason: "Ya hay una revisión en curso." };
+  }
+  await env.KV.put(lockKey, startedAt, { expirationTtl: 900 });
   const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=${STEAM_ID}`;
   const wishlistResponse = await fetch(wishlistUrl);
   if (!wishlistResponse.ok) {
@@ -166,6 +173,7 @@ async function runCheck(env, { manual = false } = {}) {
       else if (isAtLow && old && !old.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
 
       if (type) {
+        if (notifications.length >= MAX_ALERTS_PER_RUN) continue;
         const steamData = await getSteamAppData(game.appid, title);
         title = steamData.name;
         const notification = {
@@ -253,6 +261,7 @@ async function runCheck(env, { manual = false } = {}) {
     manual
   };
   await saveRun(env, result);
+  await env.KV.delete(lockKey);
   console.log(JSON.stringify(result));
   return result;
 }
@@ -298,78 +307,47 @@ async function sendTelegram(env, text) {
 
 async function sendTelegramPhoto(env, item) {
   const telegramUrl = "https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendPhoto";
-  const candidates = [...new Set([
-    ...(item.coverCandidates || []),
-    item.cover,
-    item.appid === "2069250" ? "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2069250/14a0a45da992ca33d59eb318b5cb9598c070e1c1/header.jpg" : null,
-    "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + item.appid + "/header.jpg",
-    "https://cdn.akamai.steamstatic.com/steam/apps/" + item.appid + "/header.jpg",
-    "https://cdn.cloudflare.steamstatic.com/steam/apps/" + item.appid + "/header.jpg"
-  ].filter(Boolean))];
-  for (const imageUrl of candidates) {
-    try {
-      const imageResponse = await fetch(imageUrl, { headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" } });
-      if (!imageResponse.ok) { console.warn("Portada no disponible", imageUrl, imageResponse.status); continue; }
-      const imageBlob = await imageResponse.blob();
-      if (!imageBlob.type.startsWith("image/") || imageBlob.size < 1000) {
-        console.warn("Steam CDN no devolvió una imagen válida", imageUrl, imageBlob.type, imageBlob.size);
-        continue;
-      }
-      const form = new FormData();
-      form.append("chat_id", env.TELEGRAM_CHAT_ID);
-      form.append("photo", imageBlob, "steam-cover.jpg");
-      form.append("caption", formatAlert(item));
-      const response = await fetch(telegramUrl, { method: "POST", body: form });
-      const result = await response.json();
-      if (!response.ok || !result.ok) { console.warn("Telegram rechazó la portada", result); continue; }
-      return;
-    } catch (error) { console.warn("Error cargando portada", imageUrl, error); }
+  const photoUrl = item.cover || ("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + item.appid + "/header.jpg");
+  try {
+    // Telegram descarga la imagen; el Worker evita consultar varios CDN por cada juego.
+    const response = await fetch(telegramUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, photo: photoUrl, caption: formatAlert(item) })
+    });
+    const result = await response.json();
+    if (response.ok && result.ok) return;
+    console.warn("Telegram no pudo enviar la portada; se enviará texto.", result);
+  } catch (error) {
+    console.warn("Error enviando portada a Telegram.", error);
   }
-  console.warn("No se encontró una portada; se enviará el aviso como texto.", item.appid);
   await sendTelegram(env, formatAlert(item));
 }
 
 async function getSteamAppData(appid, fallback) {
   const defaultCover = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + appid + "/header.jpg";
-  const knownCoverFallbacks = {
-    "2069250": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2069250/14a0a45da992ca33d59eb318b5cb9598c070e1c1/header.jpg"
-  };
-  for (const country of ["mx", "us"]) {
-    try {
-      const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=" + country + "&l=spanish", {
-        headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" }
-      });
-      if (!response.ok) continue;
+  try {
+    // Una sola consulta a Steam por juego, usando la región México.
+    const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=mx&l=spanish", {
+      headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" }
+    });
+    if (response.ok) {
       const data = await response.json();
       const game = data?.[String(appid)]?.data;
-      if (!game) continue;
-      const price = game.price_overview || {};
-      let discountExpiration = price.discount_expiration || game.discount_expiration || null;
-      if (!discountExpiration && Number(price.discount_percent || 0) > 0) {
-        discountExpiration = await getFeaturedDiscountExpiration(appid);
+      if (game) {
+        const price = game.price_overview || {};
+        return {
+          name: game.name || fallback,
+          cover: game.header_image || game.capsule_image || defaultCover,
+          coverCandidates: [game.header_image, game.capsule_image, defaultCover].filter(Boolean),
+          discountExpiration: price.discount_expiration || game.discount_expiration || null
+        };
       }
-      const knownCover = knownCoverFallbacks[String(appid)];
-      const coverCandidates = [...new Set([
-        game.header_image, game.capsule_image, game.capsule_imagev5,
-        knownCover, defaultCover
-      ].filter(Boolean))];
-      return {
-        name: game.name || fallback,
-        cover: game.header_image || knownCover || defaultCover,
-        coverCandidates,
-        discountExpiration
-      };
-    } catch {
-      // Try the next Steam region before using a fallback image URL.
     }
+  } catch (error) {
+    console.warn("Steam appdetails no disponible", appid, error);
   }
-  const knownCover = knownCoverFallbacks[String(appid)];
-  return {
-    name: fallback,
-    cover: knownCover || defaultCover,
-    coverCandidates: [knownCover, defaultCover].filter(Boolean),
-    discountExpiration: null
-  };
+  return { name: fallback, cover: defaultCover, coverCandidates: [defaultCover], discountExpiration: null };
 }
 
 async function getFeaturedDiscountExpiration(appid) {
