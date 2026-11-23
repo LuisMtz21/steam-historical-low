@@ -168,7 +168,7 @@ async function runCheck(env, { manual = false } = {}) {
       const lowAmount = Math.min(comparisonLow, currentAmount);
       const isNewRecord = hasPreviousLow && currentAmount < comparisonLow - 0.000001;
       const isAtLow = currentAmount <= comparisonLow + 0.000001;
-      const lowSource = hasHistoricalLow ? "Steam México (IsThereAnyDeal)" : "registro del monitor";
+      const lowSource = hasHistoricalLow && (!hasPreviousLow || itadLowAmount <= Number(old.lowAmount)) ? "Steam México (IsThereAnyDeal)" : "registro del monitor";
       let title = old?.title || `Steam App ${game.appid}`;
 
       let type = null;
