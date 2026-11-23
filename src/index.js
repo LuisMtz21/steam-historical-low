@@ -6,7 +6,7 @@ const HISTORY_KEY = "notification-history-v1";
 const SETTINGS_KEY = "monitor-settings-v1";
 const LAST_RUN_KEY = "last-run-v1";
 const LAST_RESULT_KEY = "last-result-v1";
-const BATCH_SIZE = 200;
+const BATCH_SIZE = 100;
 const MAX_ALERTS_PER_RUN = 10;
 
 export default {
@@ -103,7 +103,8 @@ async function runCheck(env, { manual = false } = {}) {
   const previousState = await env.KV.get(STATE_KEY, "json") || {};
   const nextState = { ...previousState };
   const notifications = [];
-  const usdToMxn = await getUsdToMxnRate();
+  let withoutMexicanPrice = 0;
+  let withoutComparableHistoricalLow = 0;
   let mapped = 0;
   let checked = 0;
   let withoutCurrentPrice = 0;
@@ -127,22 +128,23 @@ async function runCheck(env, { manual = false } = {}) {
 
     const ids = gameIds.map(game => game.id);
     const query = `country=${COUNTRY}&shops=${STEAM_SHOP_ID}`;
-    const [overview, storeLows] = await Promise.all([
-      itadPost(`https://api.isthereanydeal.com/games/overview/v2?${query}`, env, ids),
-      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?${query}`, env, ids)
+    const [storeLows, steamMexicanPrices] = await Promise.all([
+      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?${query}`, env, ids),
+      getSteamMexicanPrices(batch)
     ]);
 
-    const currentById = new Map((overview?.prices || []).map(row => [row.id, row]));
+    const lowById = new Map((storeLows || []).map(row => [row.id, row]));
     const lowById = new Map((storeLows || []).map(row => [row.id, row]));
 
     for (const game of gameIds) {
-      const currentRow = currentById.get(game.id);
       const lowRow = lowById.get(game.id);
-      const current = currentRow?.current;
-      const currentPrice = current?.price;
+      const steamPrice = steamMexicanPrices.get(String(game.appid));
+      const currentPrice = steamPrice?.price;
       const steamLow = lowRow?.lows?.find(low => Number(low.shop?.id ?? low.shop) === STEAM_SHOP_ID);
-      const hasCurrentPrice = Boolean(currentPrice);
-      const hasHistoricalLow = Boolean(steamLow?.price);
+      const hasCurrentPrice = Boolean(currentPrice && currentPrice.currency === "MXN");
+      const hasHistoricalLow = Boolean(steamLow?.price && steamLow.price.currency === "MXN");
+      if (currentPrice && currentPrice.currency !== "MXN") withoutMexicanPrice++;
+      if (steamLow?.price && steamLow.price.currency !== "MXN") withoutComparableHistoricalLow++;
       if (!hasCurrentPrice || !hasHistoricalLow) {
         if (!hasCurrentPrice && !hasHistoricalLow) withoutBothPrices++;
         else if (!hasCurrentPrice) withoutCurrentPrice++;
@@ -152,21 +154,17 @@ async function runCheck(env, { manual = false } = {}) {
 
       const currentAmount = Number(currentPrice.amount);
       const lowAmount = Number(steamLow.price.amount);
-      const currency = currentPrice.currency || steamLow.price.currency || "MXN";
+      const currency = "MXN";
       if (!Number.isFinite(currentAmount) || !Number.isFinite(lowAmount)) continue;
-      if (currentPrice.currency && steamLow.price.currency && currentPrice.currency !== steamLow.price.currency) continue;
-
       checked++;
-      const regularAmount = Number(current?.regular?.amount);
-      const discountPercent = Number.isFinite(Number(current?.cut))
-        ? Number(current.cut)
-        : (regularAmount > currentAmount ? Math.round((1 - currentAmount / regularAmount) * 100) : 0);
+      const regularAmount = steamPrice.regularAmount;
+      const discountPercent = steamPrice.discountPercent;
       const key = String(game.appid);
       const old = previousState[key];
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
       const isNewRecord = hasPreviousLow && lowAmount < Number(old.lowAmount) - 0.000001;
       const isAtLow = currentAmount <= lowAmount + 0.000001;
-      let title = currentRow?.title || old?.title || `Steam App ${game.appid}`;
+      let title = old?.title || `Steam App ${game.appid}`;
 
       let type = null;
       if (isAtLow && isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
@@ -185,7 +183,6 @@ async function runCheck(env, { manual = false } = {}) {
           regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
           historicalLow: lowAmount,
           currency,
-          usdToMxn,
           discountPercent,
           cover: steamData.cover,
           coverCandidates: steamData.coverCandidates,
@@ -237,9 +234,11 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin precio actual: ${withoutCurrentPrice}`,
       `Sin mínimo histórico de Steam: ${withoutHistoricalLow}`,
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
+      `Sin precio regional MXN de Steam: ${withoutMexicanPrice}`,
+      `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
       `Notificaciones nuevas: ${notifications.length}`,
       `Horarios automáticos: 8:00 a. m. y 12:05 p. m. (Monterrey).`,
-      `Tipo de cambio USD/MXN usado para mostrar precios: ${usdToMxn ? usdToMxn.toFixed(4) : "no disponible"}`
+      `Los precios se consultan en Steam México; no se realizan conversiones de moneda.`
     ].join("\n"));
   }
 
@@ -257,6 +256,8 @@ async function runCheck(env, { manual = false } = {}) {
     withoutCurrentPrice,
     withoutHistoricalLow,
     withoutBothPrices,
+    withoutMexicanPrice,
+    withoutComparableHistoricalLow,
     alerts: notifications.length,
     manual
   };
@@ -269,6 +270,28 @@ async function runCheck(env, { manual = false } = {}) {
 async function saveRun(env, result) {
   await env.KV.put(LAST_RUN_KEY, result.finishedAt);
   await env.KV.put(LAST_RESULT_KEY, JSON.stringify(result));
+}
+
+async function getSteamMexicanPrices(appids) {
+  const prices = new Map();
+  for (let offset = 0; offset < appids.length; offset += 100) {
+    const batch = appids.slice(offset, offset + 100);
+    const url = "https://store.steampowered.com/api/appdetails/?appids=" + batch.join(",") + "&cc=mx&l=spanish&filters=price_overview";
+    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" } });
+    if (!response.ok) throw new Error("Steam México respondió HTTP " + response.status + " al consultar precios regionales.");
+    const data = await response.json();
+    for (const appid of batch) {
+      const detail = data?.[String(appid)]?.data;
+      const overview = detail?.price_overview;
+      if (!overview) continue;
+      prices.set(String(appid), {
+        price: { amount: Number(overview.final) / 100, currency: overview.currency },
+        regularAmount: Number(overview.initial) / 100,
+        discountPercent: Number(overview.discount_percent) || 0
+      });
+    }
+  }
+  return prices;
 }
 
 async function itadPost(url, env, body) {
@@ -382,39 +405,21 @@ function findDiscountExpiration(value, appid, depth) {
   return null;
 }
 
-async function getUsdToMxnRate() {
-  try {
-    const response = await fetch("https://open.er-api.com/v6/latest/USD");
-    if (!response.ok) return null;
-    const data = await response.json();
-    const rate = Number(data?.rates?.MXN);
-    return Number.isFinite(rate) && rate > 0 ? rate : null;
-  } catch {
-    return null;
-  }
-}
 
 function formatAlert(item) {
-  const money = (value, currency) => new Intl.NumberFormat("es-MX", {
-    style: "currency", currency, maximumFractionDigits: 2
+  const money = value => new Intl.NumberFormat("es-MX", {
+    style: "currency", currency: "MXN", maximumFractionDigits: 2
   }).format(value);
-  const isUsdConverted = item.currency === "USD" && Number.isFinite(item.usdToMxn) && item.usdToMxn > 0;
-  const displayPrice = value => {
-    if (item.currency === "MXN") return "MXN " + money(value, "MXN");
-    if (isUsdConverted) return "MXN " + money(value * item.usdToMxn, "MXN") + " (USD " + money(value, "USD") + ")";
-    return money(value, item.currency) + " (" + item.currency + "; conversión MXN no disponible)";
-  };
   return [
     `🎮 ${item.type}`,
     item.title,
-    `Precio actual: ${displayPrice(item.price)}`,
-    `Mínimo histórico Steam: ${displayPrice(item.historicalLow)}`,
-    isUsdConverted ? `Conversión aproximada: 1 USD = ${item.usdToMxn.toFixed(4)} MXN` : null,
+    `Precio actual: ${money(item.price)} MXN`,
+    `Mínimo histórico Steam: ${money(item.historicalLow)} MXN`,
     `Descuento: ${item.discountPercent}%`,
     `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
     `Historial de precios SteamDB México: https://steamdb.info/app/${item.appid}/?cc=mx`
-  ].filter(Boolean).join("\n");
+  ].join("\\n");
 }
 
 function formatDiscountExpiration(value) {
