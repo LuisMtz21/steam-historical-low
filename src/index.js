@@ -7,7 +7,7 @@ const SETTINGS_KEY = "monitor-settings-v1";
 const LAST_RUN_KEY = "last-run-v1";
 const LAST_RESULT_KEY = "last-result-v1";
 const BATCH_SIZE = 200;
-const MAX_ALERTS_PER_RUN = 15;
+const MAX_ALERTS_PER_RUN = 10;
 
 export default {
   async fetch(request, env, ctx) {
@@ -414,7 +414,7 @@ function formatAlert(item) {
     `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
     `Historial de precios SteamDB México: https://steamdb.info/app/${item.appid}/?cc=mx`
-  ].filter(Boolean).join("\\n");
+  ].filter(Boolean).join("\n");
 }
 
 function formatDiscountExpiration(value) {
