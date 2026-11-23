@@ -419,7 +419,7 @@ function formatAlert(item) {
     `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
     `Historial de precios SteamDB México: https://steamdb.info/app/${item.appid}/?cc=mx`
-  ].join("\\n");
+  ].join("\n");
 }
 
 function formatDiscountExpiration(value) {
