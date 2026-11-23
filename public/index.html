@@ -38,13 +38,13 @@
  <div class="history-head"><div><h2>Historial de notificaciones</h2><span>Alertas enviadas por Telegram con precios de Steam México</span></div><span id="historyUpdated">—</span></div>
  <div class="table-wrap"><table><thead><tr><th>Portada</th><th>Juego</th><th>Tipo de alerta</th><th>Precio actual</th><th>Precio normal</th><th>Mínimo histórico</th><th>Descuento</th><th>Caduca</th><th>Notificación</th></tr></thead><tbody id="historyBody"><tr><td colspan="9" class="empty">Cargando historial…</td></tr></tbody></table></div>
 </section>
-<div class="footer"><span>Steam Historical Low Notifier · Cloudflare Workers</span><span>Precios en MXN; si la API devuelve USD, se muestra conversión estimada y el original.</span></div>
+<div class="footer"><span>Steam Historical Low Notifier · Cloudflare Workers</span><span>Precios regionales de Steam México; no se realizan conversiones de moneda.</span></div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
 const money=(n,c="MXN")=>new Intl.NumberFormat("es-MX",{style:"currency",currency:c,maximumFractionDigits:2}).format(Number(n)||0);
-function displayMoney(value,item){const currency=item.currency||"MXN";const amount=Number(value)||0;if(currency==="MXN")return money(amount,"MXN");if(currency==="USD"&&Number(item.usdToMxn)>0)return money(amount*Number(item.usdToMxn),"MXN")+' <small class="muted">('+money(amount,"USD")+')</small>';return money(amount,currency)}
+function displayMoney(value,item){const currency=item.currency||"MXN";return money(Number(value)||0,currency)}
 function expiration(value){if(value===null||value===undefined||value===""||Number(value)===0)return "No disponible";let v=value;if(typeof v==="number"||/^\d+$/.test(String(v))){v=Number(v);if(v<1000000000000)v*=1000;}const d=new Date(v);return Number.isNaN(d.getTime())?"No disponible":new Intl.DateTimeFormat("es-MX",{dateStyle:"medium",timeStyle:"short",timeZone:"America/Monterrey"}).format(d)}
 function date(v){return v?new Intl.DateTimeFormat("es-MX",{dateStyle:"medium",timeStyle:"short"}).format(new Date(v)):"—"}
 function coverFallback(img){const app=img.dataset.appid;const step=Number(img.dataset.step||0);const urls=["https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/"+app+"/header.jpg","https://cdn.akamai.steamstatic.com/steam/apps/"+app+"/header.jpg","https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/"+app+"/capsule_231x87.jpg"];if(step<urls.length){img.dataset.step=String(step+1);img.src=urls[step]}else{img.onerror=null;img.style.display="none"}}
