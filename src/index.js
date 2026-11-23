@@ -144,31 +144,36 @@ async function runCheck(env, { manual = false } = {}) {
       const hasCurrentPrice = Boolean(currentPrice && currentPrice.currency === "MXN");
       const hasHistoricalLow = Boolean(steamLow?.price && steamLow.price.currency === "MXN");
       if (currentPrice && currentPrice.currency !== "MXN") withoutMexicanPrice++;
-      if (steamLow?.price && steamLow.price.currency !== "MXN") withoutComparableHistoricalLow++;
-      if (!hasCurrentPrice || !hasHistoricalLow) {
-        if (!hasCurrentPrice && !hasHistoricalLow) withoutBothPrices++;
-        else if (!hasCurrentPrice) withoutCurrentPrice++;
-        else withoutHistoricalLow++;
+      if (!hasCurrentPrice) {
+        if (!hasHistoricalLow) withoutBothPrices++;
+        else withoutCurrentPrice++;
         continue;
       }
+      if (!hasHistoricalLow) withoutComparableHistoricalLow++;
 
       const currentAmount = Number(currentPrice.amount);
-      const lowAmount = Number(steamLow.price.amount);
       const currency = "MXN";
-      if (!Number.isFinite(currentAmount) || !Number.isFinite(lowAmount)) continue;
+      if (!Number.isFinite(currentAmount)) continue;
       checked++;
       const regularAmount = steamPrice.regularAmount;
       const discountPercent = steamPrice.discountPercent;
       const key = String(game.appid);
       const old = previousState[key];
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
-      const isNewRecord = hasPreviousLow && lowAmount < Number(old.lowAmount) - 0.000001;
-      const isAtLow = currentAmount <= lowAmount + 0.000001;
+      const itadLowAmount = hasHistoricalLow ? Number(steamLow.price.amount) : null;
+      const comparisonLow = hasHistoricalLow
+        ? (hasPreviousLow ? Math.min(itadLowAmount, Number(old.lowAmount)) : itadLowAmount)
+        : (hasPreviousLow ? Number(old.lowAmount) : currentAmount);
+      if (!Number.isFinite(comparisonLow)) continue;
+      const lowAmount = Math.min(comparisonLow, currentAmount);
+      const isNewRecord = hasPreviousLow && currentAmount < comparisonLow - 0.000001;
+      const isAtLow = currentAmount <= comparisonLow + 0.000001;
+      const lowSource = hasHistoricalLow ? "Steam México (IsThereAnyDeal)" : "registro del monitor";
       let title = old?.title || `Steam App ${game.appid}`;
 
       let type = null;
-      if (isAtLow && isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
-      else if (isAtLow && old && !old.wasAtLow) type = "IGUALÓ SU MÍNIMO HISTÓRICO";
+      if (isAtLow && isNewRecord) type = hasHistoricalLow ? "NUEVO MÍNIMO HISTÓRICO" : "NUEVO MÍNIMO REGISTRADO";
+      else if (isAtLow && old && !old.wasAtLow) type = hasHistoricalLow ? "IGUALÓ SU MÍNIMO HISTÓRICO" : "IGUALÓ SU MÍNIMO REGISTRADO";
 
       if (type) {
         if (notifications.length >= MAX_ALERTS_PER_RUN) continue;
@@ -181,7 +186,8 @@ async function runCheck(env, { manual = false } = {}) {
           appid: game.appid,
           price: currentAmount,
           regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
-          historicalLow: lowAmount,
+          historicalLow: hasHistoricalLow ? itadLowAmount : comparisonLow,
+          historicalLowSource: lowSource,
           currency,
           discountPercent,
           cover: steamData.cover,
@@ -414,7 +420,7 @@ function formatAlert(item) {
     `🎮 ${item.type}`,
     item.title,
     `Precio actual: ${money(item.price)} MXN`,
-    `Mínimo histórico Steam: ${money(item.historicalLow)} MXN`,
+    `Mínimo ${item.historicalLowSource === "registro del monitor" ? "registrado por el monitor" : "histórico Steam México"}: ${money(item.historicalLow)} MXN`,
     `Descuento: ${item.discountPercent}%`,
     `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
