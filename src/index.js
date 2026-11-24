@@ -133,7 +133,7 @@ async function runCheck(env, { manual = false } = {}) {
   let newHistoricalLowCount = 0;
   let discountedAboveHistoricalLowCount = 0;
 
-  const steamMexicanPrices = await getSteamMexicanPrices(appids);
+  const steamMexicanPrices = await getSteamMexicanPrices(appids, env);
   steamMexicanPricesCount = steamMexicanPrices.size;
 
   // Primera sincronización: consultar el mínimo histórico de todos los juegos con precio.
@@ -471,25 +471,41 @@ async function getSteamIndexHistoricalLow(appid, env) {
   return null;
 }
 
-async function getSteamMexicanPrices(appids) {
+async function getSteamMexicanPrices(appids, env) {
   const prices = new Map();
   for (let offset = 0; offset < appids.length; offset += 100) {
     const batch = appids.slice(offset, offset + 100);
-    const url = "https://store.steampowered.com/api/appdetails/?appids=" + batch.join(",") + "&cc=mx&l=spanish&filters=price_overview";
+    const url = "https://public-api.steamidx.com/v1/apps?ids=" + batch.join(",") + "&currency=MXN";
     const response = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" },
+      headers: {
+        "Authorization": "Bearer " + env.STEAM_INDEX_API_KEY,
+        "Accept": "application/json"
+      },
       signal: AbortSignal.timeout(20000)
     });
-    if (!response.ok) throw new Error("Steam México respondió HTTP " + response.status + " al consultar precios regionales.");
-    const data = await response.json();
-    for (const appid of batch) {
-      const detail = data?.[String(appid)]?.data;
-      const overview = detail?.price_overview;
-      if (!overview) continue;
-      prices.set(String(appid), {
-        price: { amount: Number(overview.final) / 100, currency: overview.currency },
-        regularAmount: Number(overview.initial) / 100,
-        discountPercent: Number(overview.discount_percent) || 0
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 500);
+      throw new Error("Steam Index respondió HTTP " + response.status + " al consultar precios MXN: " + detail);
+    }
+
+    const result = await response.json();
+    for (const app of result?.data || []) {
+      const appid = String(app.appId);
+      const price = app.price;
+      if (
+        !/^\\d+$/.test(appid) ||
+        !price ||
+        price.currency !== "MXN" ||
+        !Number.isFinite(Number(price.finalPrice)) ||
+        !Number.isFinite(Number(price.initialPrice))
+      ) continue;
+
+      prices.set(appid, {
+        price: { amount: Number(price.finalPrice) / 100, currency: "MXN" },
+        regularAmount: Number(price.initialPrice) / 100,
+        discountPercent: Number(price.discountPercent) || 0,
+        discountExpiration: price.discountEndsAt || null,
+        title: app.name || null
       });
     }
   }
