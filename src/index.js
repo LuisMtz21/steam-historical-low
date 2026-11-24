@@ -287,6 +287,7 @@ async function runCheck(env, { manual = false } = {}) {
     await env.KV.put("telegram-test-sent", new Date().toISOString());
   }
 
+  const offersFoundBeforeLimit = notifications.length;
   notifications.sort((a, b) => b.discountPercent - a.discountPercent);
   notifications.splice(MAX_ALERTS_PER_RUN);
 
@@ -327,6 +328,7 @@ async function runCheck(env, { manual = false } = {}) {
       `Precios actuales MXN de ITAD: ${itadOverviewCurrentMxCount}`,
       `Precios actuales ITAD en otra moneda: ${itadOverviewCurrentOtherCount}`,
       `Ofertas MXN de ITAD: ${itadDealsMatchedMxCount}`,
+      `Ofertas detectadas antes del límite: ${offersFoundBeforeLimit}`,
       `Precios seleccionados: Steam ${selectedFromSteamCount}, ITAD ${selectedFromItadOverviewCount}, ofertas ITAD ${selectedFromItadDealCount}`,
       `Notificaciones nuevas: ${notifications.length}`,
       `Horarios automáticos: 8:00 a. m. y 12:05 p. m. (Monterrey).`,
@@ -356,6 +358,7 @@ async function runCheck(env, { manual = false } = {}) {
       itadOverviewCurrentOtherCurrency: itadOverviewCurrentOtherCount,
       itadDealsRows: itadDealsRowsCount,
       itadDealsMatchedMx: itadDealsMatchedMxCount,
+      offersFoundBeforeLimit,
       selectedFromSteam: selectedFromSteamCount,
       selectedFromItadOverview: selectedFromItadOverviewCount,
       selectedFromItadDeals: selectedFromItadDealCount
