@@ -62,9 +62,9 @@ async function loadStatus(){
   $("mappedCount").textContent=last.gamesMappedToItad??"—";
   $("historyCount").textContent=s.historyCount??0;
   $("scheduleLabel").textContent="8:00 AM / 12:05 PM";
-  $("connections").innerHTML=[["Steam",s.connections.steam],["IsThereAnyDeal",s.connections.itad],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");
+  $("connections").innerHTML=[["Steam",s.connections.steam],["IsThereAnyDeal",s.connections.itad],["Steam Index",s.connections.steamIndex],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");
   if(s.lastRun){
-   $("runResult").textContent="Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Mínimos Steam México identificados: "+(d.storeLowMatchedMx??0)+".";
+   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":("Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Historiales Steam Index MXN: "+(d.steamIndexHistoryMatchedMx??0)+".");
   }else{
    $("runResult").textContent="Historial reiniciado. La primera revisión establecerá la línea base de mínimos históricos.";
   }
@@ -93,7 +93,7 @@ async function loadHistory(){
  }
 }
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-async function runNow(){const b=$("runButton");b.disabled=true;b.textContent="Revisando wishlist…";$("runResult").textContent="Consultando Steam e IsThereAnyDeal. Puede tardar unos momentos.";try{const data=await api("/api/run",{method:"POST"});const r=data.result;if(r.skipped){$("runResult").textContent="Ya hay una revisión en curso. Espera a que termine antes de volver a probar.";toast("Revisión en curso.");return}const d=r.diagnostics||{};$("runResult").textContent="Prueba completada: "+r.wishlistGames+" juegos en wishlist, "+r.gamesChecked+" revisados, "+(r.alerts??0)+" alertas de mínimos históricos ("+(r.newHistoricalLow??0)+" nuevos récords y "+(r.atHistoricalLow??0)+" mínimos alcanzados). Mínimos Steam México identificados: "+(d.storeLowMatchedMx??0)+". Resumen enviado por Telegram." ;toast("Revisión completada correctamente.");await Promise.all([loadStatus(),loadHistory()])}catch(e){$("runResult").textContent="Error: "+e.message;toast(e.message)}finally{b.disabled=false;b.textContent="▶ Probar ahora"}}
+async function runNow(){const b=$("runButton");b.disabled=true;b.textContent="Revisando wishlist…";$("runResult").textContent="Consultando Steam e IsThereAnyDeal. Puede tardar unos momentos.";try{const data=await api("/api/run",{method:"POST"});const r=data.result;if(r.skipped){$("runResult").textContent="Ya hay una revisión en curso. Espera a que termine antes de volver a probar.";toast("Revisión en curso.");return}const d=r.diagnostics||{};$("runResult").textContent="Prueba completada: "+r.wishlistGames+" juegos en wishlist, "+r.gamesChecked+" revisados, "+(r.alerts??0)+" alertas de mínimos históricos ("+(r.newHistoricalLow??0)+" nuevos récords y "+(r.atHistoricalLow??0)+" mínimos alcanzados). Historiales Steam Index MXN: "+(d.steamIndexHistoryMatchedMx??0)+". Resumen enviado por Telegram." ;toast("Revisión completada correctamente.");await Promise.all([loadStatus(),loadHistory()])}catch(e){$("runResult").textContent="Error: "+e.message;toast(e.message)}finally{b.disabled=false;b.textContent="▶ Probar ahora"}}
 loadStatus();loadHistory();setInterval(()=>{loadStatus();loadHistory()},60000);
 </script>
 </body>
