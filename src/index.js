@@ -111,6 +111,14 @@ async function runCheck(env, { manual = false } = {}) {
   let checked = 0;
   let withoutCurrentPrice = 0;
   let withoutBothPrices = 0;
+  let steamMexicanPricesCount = 0;
+  let itadOverviewCurrentMxCount = 0;
+  let itadOverviewCurrentOtherCount = 0;
+  let itadDealsRowsCount = 0;
+  let itadDealsMatchedMxCount = 0;
+  let selectedFromSteamCount = 0;
+  let selectedFromItadDealCount = 0;
+  let selectedFromItadOverviewCount = 0;
 
   for (let offset = 0; offset < appids.length; offset += BATCH_SIZE) {
     const batch = appids.slice(offset, offset + BATCH_SIZE);
@@ -146,19 +154,50 @@ async function runCheck(env, { manual = false } = {}) {
       ) || null
     ]));
 
+    // Diagnóstico por fuente y moneda para detectar respuestas regionales incompletas.
+    steamMexicanPricesCount += steamMexicanPrices.size;
+    itadDealsRowsCount += Array.isArray(itadDeals)
+      ? itadDeals.reduce((total, row) => total + (Array.isArray(row.deals) ? row.deals.length : 0), 0)
+      : 0;
+    itadDealsMatchedMxCount += [...dealsById.values()].filter(Boolean).length;
+    for (const row of overview?.prices || []) {
+      if (Number(row.current?.shop?.id) !== STEAM_SHOP_ID) continue;
+      if (row.current?.price?.currency === "MXN") itadOverviewCurrentMxCount++;
+      else if (row.current?.price?.currency) itadOverviewCurrentOtherCount++;
+    }
+
     for (const game of gameIds) {
       const overviewRow = lowById.get(game.id);
       const steamPrice = steamMexicanPrices.get(String(game.appid));
-      // IsThereAnyDeal ya devuelve el precio actual de la tienda seleccionada en MXN.
-      // Se prioriza este dato; Steam AppDetails queda como respaldo.
       const itadDeal = dealsById.get(game.id);
-      const itadCurrent = itadDeal || (overviewRow?.current && Number(overviewRow.current.shop?.id) === STEAM_SHOP_ID
+      const itadCurrent = overviewRow?.current && Number(overviewRow.current.shop?.id) === STEAM_SHOP_ID
         ? overviewRow.current
-        : null);
-      const currentPrice = itadDeal?.price || itadCurrent?.price || steamPrice?.price;
-      const regularPrice = itadDeal?.regular || itadCurrent?.regular || (steamPrice
-        ? { amount: steamPrice.regularAmount, currency: steamPrice.price.currency }
-        : null);
+        : null;
+
+      // No permitir que un precio EUR/USD de ITAD tape un precio MXN válido de Steam.
+      // Precio, precio normal y descuento siempre se toman de la misma fuente.
+      const steamOffer = steamPrice ? {
+        price: steamPrice.price,
+        regular: { amount: steamPrice.regularAmount, currency: steamPrice.price.currency },
+        cut: steamPrice.discountPercent,
+        source: "steam"
+      } : null;
+      const candidates = [
+        itadDeal ? { ...itadDeal, source: "itad-deal" } : null,
+        itadCurrent ? { ...itadCurrent, source: "itad-overview" } : null,
+        steamOffer
+      ].filter(offer => offer?.price?.currency === "MXN");
+      const selectedOffer = candidates.find(offer =>
+        Number(offer.cut) > 0 &&
+        Number.isFinite(Number(offer.regular?.amount)) &&
+        Number(offer.price.amount) < Number(offer.regular.amount)
+      ) || candidates[0] || null;
+      const currentPrice = selectedOffer?.price || null;
+      const regularPrice = selectedOffer?.regular || null;
+      const discountPercent = Number(selectedOffer?.cut) || 0;
+      if (selectedOffer?.source === "steam") selectedFromSteamCount++;
+      else if (selectedOffer?.source === "itad-deal") selectedFromItadDealCount++;
+      else if (selectedOffer?.source === "itad-overview") selectedFromItadOverviewCount++;
       const steamLow = overviewRow?.lowest && Number(overviewRow.lowest.shop?.id) === STEAM_SHOP_ID
         ? overviewRow.lowest
         : null;
@@ -166,7 +205,8 @@ async function runCheck(env, { manual = false } = {}) {
       const hasHistoricalLow = Boolean(steamLow?.price && steamLow.price.currency === "MXN");
       if (!steamLow) withoutAnyHistoricalLow++;
       else if (steamLow.price?.currency !== "MXN") historicalLowOtherCurrency++;
-      if (currentPrice && currentPrice.currency !== "MXN") withoutMexicanPrice++;
+      const anyNonMexicanPrice = itadDeal?.price || itadCurrent?.price || steamPrice?.price;
+      if (!hasCurrentPrice && anyNonMexicanPrice && anyNonMexicanPrice.currency !== "MXN") withoutMexicanPrice++;
       if (!hasCurrentPrice) {
         if (!hasHistoricalLow) withoutBothPrices++;
         else withoutCurrentPrice++;
@@ -179,7 +219,6 @@ async function runCheck(env, { manual = false } = {}) {
       if (!Number.isFinite(currentAmount)) continue;
       checked++;
       const regularAmount = Number(regularPrice?.amount);
-      const discountPercent = Number(itadDeal?.cut ?? itadCurrent?.cut ?? steamPrice?.discountPercent) || 0;
       const key = String(game.appid);
       const old = previousState[key];
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
@@ -271,6 +310,11 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin ningún mínimo histórico de Steam: ${withoutAnyHistoricalLow}`,
       `Mínimo histórico disponible en otra moneda: ${historicalLowOtherCurrency}`,
       `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
+      `Precios MXN obtenidos de Steam: ${steamMexicanPricesCount}`,
+      `Precios actuales MXN de ITAD: ${itadOverviewCurrentMxCount}`,
+      `Precios actuales ITAD en otra moneda: ${itadOverviewCurrentOtherCount}`,
+      `Ofertas MXN de ITAD: ${itadDealsMatchedMxCount}`,
+      `Precios seleccionados: Steam ${selectedFromSteamCount}, ITAD ${selectedFromItadOverviewCount}, ofertas ITAD ${selectedFromItadDealCount}`,
       `Notificaciones nuevas: ${notifications.length}`,
       `Horarios automáticos: 8:00 a. m. y 12:05 p. m. (Monterrey).`,
       `Los precios se consultan en Steam México; no se realizan conversiones de moneda.`
@@ -293,6 +337,16 @@ async function runCheck(env, { manual = false } = {}) {
     withoutMexicanPrice,
     withoutComparableHistoricalLow,
     alerts: notifications.length,
+    diagnostics: {
+      steamMexicanPrices: steamMexicanPricesCount,
+      itadOverviewCurrentMx: itadOverviewCurrentMxCount,
+      itadOverviewCurrentOtherCurrency: itadOverviewCurrentOtherCount,
+      itadDealsRows: itadDealsRowsCount,
+      itadDealsMatchedMx: itadDealsMatchedMxCount,
+      selectedFromSteam: selectedFromSteamCount,
+      selectedFromItadOverview: selectedFromItadOverviewCount,
+      selectedFromItadDeals: selectedFromItadDealCount
+    },
     manual
   };
   await saveRun(env, result);
