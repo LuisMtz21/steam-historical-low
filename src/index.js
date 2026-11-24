@@ -228,13 +228,13 @@ async function runCheck(env, { manual = false } = {}) {
       ? currentAmount
       : (hasReference ? comparisonLow : null);
     const lowSource = steamIndexLow
-      ? "Steam Index · Steam México"
+      ? "Steam Index · Steam México (desde septiembre de 2026)"
       : "mínimo histórico guardado por el monitor";
     const title = old?.title || "Steam App " + appid;
 
     let type = null;
-    if (isNewRecord) type = "NUEVO MÍNIMO HISTÓRICO";
-    else if (isAtLow && !old?.wasAtLow) type = "MÍNIMO HISTÓRICO";
+    if (isNewRecord) type = "NUEVO MÍNIMO REGISTRADO";
+    else if (isAtLow && !old?.wasAtLow) type = "MÍNIMO HISTÓRICO REGISTRADO";
 
     if (type) {
       const defaultCover = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + appid + "/header.jpg";
