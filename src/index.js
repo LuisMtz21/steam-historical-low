@@ -312,7 +312,7 @@ async function runCheck(env, { manual = false } = {}) {
     await sendTelegram(env, [
       "🧪 PRUEBA MANUAL COMPLETADA",
       `Juegos en wishlist: ${appids.length}`,
-      `Juegos identificados en IsThereAnyDeal: ${mapped}`,
+      `Juegos identificados en Steam: ${appids.length}`,
       `Juegos con precios comparables revisados: ${checked}`,
       `Sin precio actual: ${withoutCurrentPrice}`,
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
