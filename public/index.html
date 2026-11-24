@@ -64,9 +64,9 @@ async function loadStatus(){
   $("scheduleLabel").textContent="8:00 AM / 12:05 PM";
   $("connections").innerHTML=[["Steam",s.connections.steam],["Steam Index",s.connections.steamIndex],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");
   if(s.lastRun){
-   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":("Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Historiales Steam Index MXN: "+(d.steamIndexHistoryMatchedMx??0)+".");
+   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":("Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Historiales Steam Index MXN: "+(d.steamIndexHistoryMatchedMx??0)+" (desde septiembre de 2026).");
   }else{
-   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":"Historial reiniciado. La primera revisión establecerá la línea base de mínimos históricos.";
+   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":"Historial reiniciado. La primera revisión establecerá la línea base de mínimos registrados por Steam Index desde septiembre de 2026.";
   }
  }catch(e){
   $("mainStatus").textContent="No se pudo conectar";
