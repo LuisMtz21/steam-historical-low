@@ -26,6 +26,7 @@ export default {
               steam: true,
               itad: Boolean(env.ITAD_API_KEY),
               telegram: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
+              steamIndex: Boolean(env.STEAM_INDEX_API_KEY),
               storage: Boolean(env.KV)
             }
           });
@@ -117,9 +118,9 @@ async function runCheck(env, { manual = false } = {}) {
   let itadOverviewCurrentOtherCount = 0;
   let itadDealsRowsCount = 0;
   let itadDealsMatchedMxCount = 0;
-  let storeLowRowsCount = 0;
-  let storeLowMatchedMxCount = 0;
-  let storeLowOtherCurrencyCount = 0;
+  let steamIndexHistoryRequestsCount = 0;
+  let steamIndexHistoryMatchedMxCount = 0;
+  let historicalLowOtherCurrencyCount = 0;
   let atHistoricalLowCount = 0;
   let newHistoricalLowCount = 0;
   let discountedAboveHistoricalLowCount = 0;
@@ -144,12 +145,10 @@ async function runCheck(env, { manual = false } = {}) {
 
     const ids = gameIds.map(game => game.id);
     const query = `country=${COUNTRY}&shops=${STEAM_SHOP_ID}`;
-    const [overview, itadDeals, storeLows, steamMexicanPrices] = await Promise.all([
+    const [overview, itadDeals, steamMexicanPrices] = await Promise.all([
       itadPost(`https://api.isthereanydeal.com/games/overview/v2?${query}`, env, ids),
-      // Ofertas activas de Steam México.
+      // Ofertas activas de Steam México; se usa como respaldo de precio actual.
       itadPost(`https://api.isthereanydeal.com/games/prices/v3?country=${COUNTRY}&shops=${STEAM_SHOP_ID}&deals=true`, env, ids),
-      // Mínimo histórico por tienda, separado del precio actual.
-      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?country=${COUNTRY}&shops=${STEAM_SHOP_ID}`, env, ids),
       getSteamMexicanPrices(batch)
     ]);
 
@@ -162,12 +161,34 @@ async function runCheck(env, { manual = false } = {}) {
         deal.price?.currency === "MXN"
       ) || null
     ]));
-    const storeLowById = new Map((storeLows || []).map(row => [
-      row.id,
-      (row.lows || [])
-        .filter(low => Number(low.shop?.id) === STEAM_SHOP_ID && low.price?.currency === "MXN" && low.price.amount !== null && low.price.amount !== undefined && Number.isFinite(Number(low.price.amount)))
-        .sort((a, b) => Number(a.price.amount) - Number(b.price.amount))[0] || null
-    ]));
+    // Steam Index conserva el historial regional de precios en la moneda original de Steam.
+    // Solo consultamos historial cuando hay oferta o el precio está tocando el mínimo guardado.
+    const historyCandidates = gameIds.filter(game => {
+      const steamPrice = steamMexicanPrices.get(String(game.appid));
+      if (!steamPrice) return false;
+      const currentAmount = Number(steamPrice.price?.amount);
+      const regularAmount = Number(steamPrice.regularAmount);
+      const old = previousState[String(game.appid)];
+      const hasOldLow = Boolean(
+        old &&
+        old.lowAmount !== null &&
+        old.lowAmount !== undefined &&
+        Number.isFinite(Number(old.lowAmount)) &&
+        old.lowCurrency === "MXN"
+      );
+      const isDiscounted = Number(steamPrice.discountPercent) > 0 &&
+        Number.isFinite(regularAmount) && currentAmount < regularAmount;
+      const isAtOrBelowOldLow = hasOldLow && currentAmount <= Number(old.lowAmount) + 0.000001;
+      const lastHistoryCheck = Date.parse(old?.historyCheckedAt || "");
+      const retryMissingHistory = !hasOldLow &&
+        (!Number.isFinite(lastHistoryCheck) || Date.now() - lastHistoryCheck >= 24 * 60 * 60 * 1000);
+      return Boolean(env.STEAM_INDEX_API_KEY && (isAtOrBelowOldLow || (isDiscounted && retryMissingHistory)));
+    });
+    const steamIndexLows = env.STEAM_INDEX_API_KEY
+      ? await getSteamIndexHistoricalLows(historyCandidates, env)
+      : new Map();
+    steamIndexHistoryRequestsCount += historyCandidates.length;
+    steamIndexHistoryMatchedMxCount += [...steamIndexLows.values()].filter(Boolean).length;
 
     // Diagnóstico por fuente y moneda para detectar respuestas regionales incompletas.
     steamMexicanPricesCount += steamMexicanPrices.size;
@@ -175,17 +196,6 @@ async function runCheck(env, { manual = false } = {}) {
       ? itadDeals.reduce((total, row) => total + (Array.isArray(row.deals) ? row.deals.length : 0), 0)
       : 0;
     itadDealsMatchedMxCount += [...dealsById.values()].filter(Boolean).length;
-    storeLowRowsCount += Array.isArray(storeLows) ? storeLows.length : 0;
-    storeLowMatchedMxCount += [...storeLowById.values()].filter(Boolean).length;
-    if (Array.isArray(storeLows)) {
-      for (const row of storeLows) {
-        for (const low of row.lows || []) {
-          if (Number(low.shop?.id) === STEAM_SHOP_ID && low.price?.currency && low.price.currency !== "MXN") {
-            storeLowOtherCurrencyCount++;
-          }
-        }
-      }
-    }
     for (const row of overview?.prices || []) {
       if (Number(row.current?.shop?.id) !== STEAM_SHOP_ID) continue;
       if (row.current?.price?.currency === "MXN") itadOverviewCurrentMxCount++;
@@ -224,12 +234,21 @@ async function runCheck(env, { manual = false } = {}) {
       if (selectedOffer?.source === "steam") selectedFromSteamCount++;
       else if (selectedOffer?.source === "itad-deal") selectedFromItadDealCount++;
       else if (selectedOffer?.source === "itad-overview") selectedFromItadOverviewCount++;
+      const steamIndexLow = steamIndexLows.get(String(game.appid)) || null;
       const overviewLow = overviewRow?.lowest &&
         Number(overviewRow.lowest.shop?.id) === STEAM_SHOP_ID &&
         overviewRow.lowest.price?.currency === "MXN"
           ? overviewRow.lowest
           : null;
-      const steamLow = storeLowById.get(game.id) || overviewLow || null;
+      const steamLow = steamIndexLow
+        ? { price: { amount: steamIndexLow.amount, currency: "MXN" }, timestamp: steamIndexLow.at }
+        : (overviewLow || null);
+      if (
+        overviewRow?.lowest &&
+        Number(overviewRow.lowest.shop?.id) === STEAM_SHOP_ID &&
+        overviewRow.lowest.price?.currency &&
+        overviewRow.lowest.price.currency !== "MXN"
+      ) historicalLowOtherCurrencyCount++;
       const hasCurrentPrice = Boolean(currentPrice && currentPrice.currency === "MXN");
       const hasHistoricalLow = Boolean(
         steamLow?.price &&
@@ -287,9 +306,9 @@ async function runCheck(env, { manual = false } = {}) {
       const nextLowAmount = isNewRecord
         ? currentAmount
         : (hasHistoricalReference ? comparisonLow : null);
-      const lowSource = hasHistoricalLow
-        ? (storeLowById.get(game.id) ? "IsThereAnyDeal Store Low · Steam México" : "IsThereAnyDeal Overview · Steam México")
-        : "registro previo del monitor";
+      const lowSource = steamIndexLow
+        ? "Steam Index · Steam México"
+        : (hasHistoricalLow ? "IsThereAnyDeal Overview · Steam México" : "registro previo del monitor");
       let title = old?.title || `Steam App ${game.appid}`;
 
       let type = null;
@@ -328,6 +347,9 @@ async function runCheck(env, { manual = false } = {}) {
         lowAmount: nextLowAmount,
         lowCurrency: currency,
         wasAtLow: isAtLow,
+        historyCheckedAt: steamIndexLows.has(String(game.appid))
+          ? new Date().toISOString()
+          : (old?.historyCheckedAt || null),
         checkedAt: new Date().toISOString()
       };
     }
@@ -385,8 +407,10 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin ningún mínimo histórico de Steam: ${withoutAnyHistoricalLow}`,
       `Mínimo histórico disponible en otra moneda: ${historicalLowOtherCurrency}`,
       `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
-      `Mínimos históricos encontrados en Store Low: ${storeLowMatchedMxCount}`,
-      `Mínimos históricos Steam en otra moneda: ${storeLowOtherCurrencyCount}`,
+      `Steam Index API: ${env.STEAM_INDEX_API_KEY ? "configurado" : "NO CONFIGURADO"}`,
+      `Historiales MXN consultados en Steam Index: ${steamIndexHistoryRequestsCount}`,
+      `Mínimos históricos MXN obtenidos: ${steamIndexHistoryMatchedMxCount}`,
+      `Mínimos históricos ITAD en otra moneda: ${historicalLowOtherCurrencyCount}`,
       `Juegos que igualaron su mínimo histórico: ${atHistoricalLowCount}`,
       `Juegos que rompieron su mínimo histórico: ${newHistoricalLowCount}`,
       `Ofertas por encima del mínimo ignoradas: ${discountedAboveHistoricalLowCount}`,
@@ -425,9 +449,10 @@ async function runCheck(env, { manual = false } = {}) {
       itadOverviewCurrentOtherCurrency: itadOverviewCurrentOtherCount,
       itadDealsRows: itadDealsRowsCount,
       itadDealsMatchedMx: itadDealsMatchedMxCount,
-      storeLowRows: storeLowRowsCount,
-      storeLowMatchedMx: storeLowMatchedMxCount,
-      storeLowOtherCurrency: storeLowOtherCurrencyCount,
+      steamIndexConfigured: Boolean(env.STEAM_INDEX_API_KEY),
+      steamIndexHistoryRequests: steamIndexHistoryRequestsCount,
+      steamIndexHistoryMatchedMx: steamIndexHistoryMatchedMxCount,
+      historicalLowOtherCurrency: historicalLowOtherCurrencyCount,
       withoutAnyHistoricalLow,
       alertsFoundBeforeLimit,
       selectedFromSteam: selectedFromSteamCount,
@@ -455,6 +480,64 @@ async function runCheck(env, { manual = false } = {}) {
 async function saveRun(env, result) {
   await env.KV.put(LAST_RUN_KEY, result.finishedAt);
   await env.KV.put(LAST_RESULT_KEY, JSON.stringify(result));
+}
+
+async function getSteamIndexHistoricalLows(games, env) {
+  const lows = new Map();
+  const concurrency = 10;
+  for (let offset = 0; offset < games.length; offset += concurrency) {
+    const batch = games.slice(offset, offset + concurrency);
+    const results = await Promise.all(batch.map(async game => [
+      String(game.appid),
+      await getSteamIndexHistoricalLow(game.appid, env)
+    ]));
+    for (const [appid, low] of results) lows.set(appid, low);
+  }
+  return lows;
+}
+
+async function getSteamIndexHistoricalLow(appid, env) {
+  const url = `https://public-api.steamidx.com/v1/apps/${appid}/prices/history?currency=MXN`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(url, {
+      headers: {
+        "Authorization": "Bearer " + env.STEAM_INDEX_API_KEY,
+        "Accept": "application/json"
+      },
+      signal: AbortSignal.timeout(20000)
+    });
+
+    if (response.status === 404) return null;
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers?.get("Retry-After")) || 60;
+      if (retryAfter > 90 || attempt === 2) {
+        throw new Error("Steam Index alcanzó su límite de solicitudes. Reintenta en " + retryAfter + " segundos.");
+      }
+      await new Promise(resolve => setTimeout(resolve, Math.max(1, retryAfter) * 1000));
+      continue;
+    }
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 500);
+      throw new Error(`Steam Index respondió HTTP ${response.status}: ${detail}`);
+    }
+
+    const result = await response.json();
+    const currency = result?.data?.currency || result?.meta?.currency;
+    const lowest = result?.data?.lowest;
+    if (
+      currency !== "MXN" ||
+      lowest?.finalPrice === null ||
+      lowest?.finalPrice === undefined ||
+      !Number.isFinite(Number(lowest.finalPrice))
+    ) return null;
+
+    return {
+      amount: Number(lowest.finalPrice) / 100,
+      currency: "MXN",
+      at: lowest.at || null
+    };
+  }
+  return null;
 }
 
 async function getSteamMexicanPrices(appids) {
