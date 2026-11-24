@@ -274,7 +274,7 @@ async function runCheck(env, { manual = false } = {}) {
       "✅ CONFIGURACIÓN CONECTADA",
       "Steam y Steam Index respondieron correctamente.",
       `Juegos en tu wishlist: ${appids.length}`,
-      `Juegos identificados: ${mapped}`,
+      `Juegos identificados: ${appids.length}`,
       "El panel de control ya puede ejecutar revisiones manuales."
     ].join("\n"));
     await env.KV.put("telegram-test-sent", new Date().toISOString());
