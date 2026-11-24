@@ -272,7 +272,7 @@ async function runCheck(env, { manual = false } = {}) {
   if (!testSent) {
     await sendTelegram(env, [
       "✅ CONFIGURACIÓN CONECTADA",
-      "Steam e IsThereAnyDeal respondieron correctamente.",
+      "Steam y Steam Index respondieron correctamente.",
       `Juegos en tu wishlist: ${appids.length}`,
       `Juegos identificados: ${mapped}`,
       "El panel de control ya puede ejecutar revisiones manuales."
@@ -318,19 +318,15 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Sin precio regional MXN de Steam: ${withoutMexicanPrice}`,
       `Sin ningún mínimo histórico de Steam: ${withoutAnyHistoricalLow}`,
-      `Mínimos históricos de ITAD en otra moneda: ${historicalLowOtherCurrencyCount}`,
       `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
       `Steam Index API: ${env.STEAM_INDEX_API_KEY ? "configurado" : "NO CONFIGURADO"}`,
       `Historiales MXN consultados en Steam Index: ${steamIndexHistoryRequestsCount}`,
       `Mínimos históricos MXN obtenidos: ${steamIndexHistoryMatchedMxCount}`,
-      `Mínimos históricos ITAD en otra moneda: ${historicalLowOtherCurrencyCount}`,
       `Juegos que igualaron su mínimo histórico: ${atHistoricalLowCount}`,
       `Juegos que rompieron su mínimo histórico: ${newHistoricalLowCount}`,
       `Ofertas por encima del mínimo ignoradas: ${discountedAboveHistoricalLowCount}`,
       `Precios MXN obtenidos de Steam: ${steamMexicanPricesCount}`,
-      `Ofertas MXN de ITAD: ${itadDealsMatchedMxCount}`,
       `Alertas de mínimos detectadas antes del límite: ${alertsFoundBeforeLimit}`,
-      `Precios seleccionados: Steam ${selectedFromSteamCount}, ITAD ${selectedFromItadOverviewCount}, ofertas ITAD ${selectedFromItadDealCount}`,
       `Notificaciones enviadas: ${notifications.length}`,
       `Horarios automáticos: 8:00 a. m. y 12:05 p. m. (Monterrey).`,
       `Los precios y mínimos se comparan exclusivamente en MXN y en Steam México.`
@@ -346,7 +342,7 @@ async function runCheck(env, { manual = false } = {}) {
     startedAt,
     finishedAt: new Date().toISOString(),
     wishlistGames: appids.length,
-    gamesMappedToItad: mapped,
+    gamesIdentified: appids.length,
     gamesChecked: checked,
     withoutCurrentPrice,
     withoutBothPrices,
@@ -358,19 +354,11 @@ async function runCheck(env, { manual = false } = {}) {
     discountedAboveHistoricalLowIgnored: discountedAboveHistoricalLowCount,
     diagnostics: {
       steamMexicanPrices: steamMexicanPricesCount,
-      itadOverviewCurrentMx: itadOverviewCurrentMxCount,
-      itadOverviewCurrentOtherCurrency: itadOverviewCurrentOtherCount,
-      itadDealsRows: itadDealsRowsCount,
-      itadDealsMatchedMx: itadDealsMatchedMxCount,
       steamIndexConfigured: Boolean(env.STEAM_INDEX_API_KEY),
       steamIndexHistoryRequests: steamIndexHistoryRequestsCount,
       steamIndexHistoryMatchedMx: steamIndexHistoryMatchedMxCount,
-      historicalLowOtherCurrency: historicalLowOtherCurrencyCount,
       withoutAnyHistoricalLow,
       alertsFoundBeforeLimit,
-      selectedFromSteam: selectedFromSteamCount,
-      selectedFromItadOverview: selectedFromItadOverviewCount,
-      selectedFromItadDeals: selectedFromItadDealCount
     },
     manual
   };
@@ -397,12 +385,36 @@ async function saveRun(env, result) {
 
 async function getSteamIndexHistoricalLows(games, env) {
   const lows = new Map();
+  for (let offset = 0; offset < games.length; offset += HISTORY_BATCH_SIZE) {
+    if (offset > 0) await new Promise(resolve => setTimeout(resolve, 61000));
+    const batch = games.slice(offset, offset + HISTORY_BATCH_SIZE);
+    const response = await fetch(WORKER_BASE_URL + "/api/internal/steam-index-history", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-token": env.STEAM_INDEX_API_KEY
+      },
+      body: JSON.stringify({ appids: batch.map(game => String(game.appid)) }),
+      signal: AbortSignal.timeout(180000)
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 500);
+      throw new Error("No se pudo consultar el lote de mínimos de Steam Index: HTTP " + response.status + ": " + detail);
+    }
+    const result = await response.json();
+    for (const [appid, low] of Object.entries(result.lows || {})) lows.set(appid, low);
+  }
+  return lows;
+}
+
+async function getSteamIndexHistoricalLowsDirect(appids, env) {
+  const lows = new Map();
   const concurrency = 10;
-  for (let offset = 0; offset < games.length; offset += concurrency) {
-    const batch = games.slice(offset, offset + concurrency);
-    const results = await Promise.all(batch.map(async game => [
-      String(game.appid),
-      await getSteamIndexHistoricalLow(game.appid, env)
+  for (let offset = 0; offset < appids.length; offset += concurrency) {
+    const batch = appids.slice(offset, offset + concurrency);
+    const results = await Promise.all(batch.map(async appid => [
+      String(appid),
+      await getSteamIndexHistoricalLow(appid, env)
     ]));
     for (const [appid, low] of results) lows.set(appid, low);
   }
@@ -476,24 +488,6 @@ async function getSteamMexicanPrices(appids) {
     }
   }
   return prices;
-}
-
-async function itadPost(url, env, body) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "ITAD-API-Key": env.ITAD_API_KEY,
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(20000)
-  });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 500);
-    throw new Error(`IsThereAnyDeal respondió HTTP ${response.status}: ${detail}`);
-  }
-  return response.json();
 }
 
 async function sendTelegram(env, text) {
@@ -632,7 +626,7 @@ function formatDiscountExpiration(value) {
 }
 
 function requireSecrets(env) {
-  for (const name of ["ITAD_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) {
+  for (const name of ["STEAM_INDEX_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) {
     if (!env[name]) throw new Error(`Falta configurar el secreto ${name} en Cloudflare.`);
   }
 }
