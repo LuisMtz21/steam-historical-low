@@ -166,12 +166,14 @@ async function runCheck(env, { manual = false } = {}) {
       const lowAmount = Math.min(comparisonLow, currentAmount);
       const isNewRecord = hasPreviousLow && currentAmount < comparisonLow - 0.000001;
       const isAtLow = currentAmount <= comparisonLow + 0.000001;
+      // El mínimo histórico puede coincidir con el precio normal; validar oferta real antes de alertar.
+      const isDiscounted = discountPercent > 0 && Number.isFinite(regularAmount) && currentAmount < regularAmount;
       const lowSource = hasHistoricalLow && (!hasPreviousLow || itadLowAmount <= Number(old.lowAmount)) ? "Steam México (IsThereAnyDeal)" : "registro del monitor";
       let title = old?.title || `Steam App ${game.appid}`;
 
       let type = null;
-      if (isAtLow && isNewRecord) type = hasHistoricalLow ? "NUEVO MÍNIMO HISTÓRICO" : "NUEVO MÍNIMO REGISTRADO";
-      else if (isAtLow && old && !old.wasAtLow) type = hasHistoricalLow ? "IGUALÓ SU MÍNIMO HISTÓRICO" : "IGUALÓ SU MÍNIMO REGISTRADO";
+      if (isDiscounted && isAtLow && isNewRecord) type = hasHistoricalLow ? "NUEVO MÍNIMO HISTÓRICO" : "NUEVO MÍNIMO REGISTRADO";
+      else if (isDiscounted && isAtLow && old && !old.wasAtLow) type = hasHistoricalLow ? "IGUALÓ SU MÍNIMO HISTÓRICO" : "IGUALÓ SU MÍNIMO REGISTRADO";
 
       if (type) {
         if (notifications.length >= MAX_ALERTS_PER_RUN) continue;
