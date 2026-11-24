@@ -243,8 +243,7 @@ async function runCheck(env, { manual = false } = {}) {
       else if (isDiscounted && !old?.wasDiscounted) type = "OFERTA ACTIVA";
 
       if (type) {
-        const steamData = await getSteamAppData(game.appid, title);
-        title = steamData.name;
+        const defaultCover = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + game.appid + "/header.jpg";
         const notification = {
           id: crypto.randomUUID(),
           type,
@@ -256,9 +255,9 @@ async function runCheck(env, { manual = false } = {}) {
           historicalLowSource: hasHistoricalLow ? lowSource : (hasPreviousLow ? "registro del monitor" : "no disponible"),
           currency,
           discountPercent,
-          cover: steamData.cover,
-          coverCandidates: steamData.coverCandidates,
-          discountExpiration: steamData.discountExpiration,
+          cover: defaultCover,
+          coverCandidates: [defaultCover],
+          discountExpiration: null,
           sentAt: new Date().toISOString(),
           url: `https://store.steampowered.com/app/${game.appid}/`
         };
@@ -290,6 +289,19 @@ async function runCheck(env, { manual = false } = {}) {
 
   notifications.sort((a, b) => b.discountPercent - a.discountPercent);
   notifications.splice(MAX_ALERTS_PER_RUN);
+
+  // Consultar detalles e imágenes solo para las 10 alertas que realmente se enviarán.
+  // Antes se consultaba Steam para cada oferta encontrada, incluso las descartadas por el límite.
+  for (let i = 0; i < notifications.length; i += 5) {
+    const batch = notifications.slice(i, i + 5);
+    const steamData = await Promise.all(batch.map(item => getSteamAppData(item.appid, item.title)));
+    batch.forEach((item, index) => {
+      item.title = steamData[index].name;
+      item.cover = steamData[index].cover;
+      item.coverCandidates = steamData[index].coverCandidates;
+      item.discountExpiration = steamData[index].discountExpiration;
+    });
+  }
 
   for (const notification of notifications) {
     await sendTelegramPhoto(env, notification);
