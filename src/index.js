@@ -129,24 +129,34 @@ async function runCheck(env, { manual = false } = {}) {
 
     const ids = gameIds.map(game => game.id);
     const query = `country=${COUNTRY}&shops=${STEAM_SHOP_ID}`;
-    const [overview, steamMexicanPrices] = await Promise.all([
+    const [overview, itadDeals, steamMexicanPrices] = await Promise.all([
       itadPost(`https://api.isthereanydeal.com/games/overview/v2?${query}`, env, ids),
+      // Endpoint especializado: devuelve exclusivamente precios con descuento.
+      itadPost(`https://api.isthereanydeal.com/games/prices/v3?country=${COUNTRY}&shops=${STEAM_SHOP_ID}&deals=true`, env, ids),
       getSteamMexicanPrices(batch)
     ]);
 
-    // Overview entrega el mínimo histórico de la tienda seleccionada junto con el precio actual.
     const lowById = new Map((overview?.prices || []).map(row => [row.id, row]));
+    const dealsById = new Map((itadDeals || []).map(row => [
+      row.id,
+      (row.deals || []).find(deal =>
+        Number(deal.shop?.id) === STEAM_SHOP_ID &&
+        Number(deal.cut) > 0 &&
+        deal.price?.currency === "MXN"
+      ) || null
+    ]));
 
     for (const game of gameIds) {
       const overviewRow = lowById.get(game.id);
       const steamPrice = steamMexicanPrices.get(String(game.appid));
       // IsThereAnyDeal ya devuelve el precio actual de la tienda seleccionada en MXN.
       // Se prioriza este dato; Steam AppDetails queda como respaldo.
-      const itadCurrent = overviewRow?.current && Number(overviewRow.current.shop?.id) === STEAM_SHOP_ID
+      const itadDeal = dealsById.get(game.id);
+      const itadCurrent = itadDeal || (overviewRow?.current && Number(overviewRow.current.shop?.id) === STEAM_SHOP_ID
         ? overviewRow.current
-        : null;
-      const currentPrice = itadCurrent?.price || steamPrice?.price;
-      const regularPrice = itadCurrent?.regular || (steamPrice
+        : null);
+      const currentPrice = itadDeal?.price || itadCurrent?.price || steamPrice?.price;
+      const regularPrice = itadDeal?.regular || itadCurrent?.regular || (steamPrice
         ? { amount: steamPrice.regularAmount, currency: steamPrice.price.currency }
         : null);
       const steamLow = overviewRow?.lowest && Number(overviewRow.lowest.shop?.id) === STEAM_SHOP_ID
@@ -169,7 +179,7 @@ async function runCheck(env, { manual = false } = {}) {
       if (!Number.isFinite(currentAmount)) continue;
       checked++;
       const regularAmount = Number(regularPrice?.amount);
-      const discountPercent = Number(itadCurrent?.cut ?? steamPrice?.discountPercent) || 0;
+      const discountPercent = Number(itadDeal?.cut ?? itadCurrent?.cut ?? steamPrice?.discountPercent) || 0;
       const key = String(game.appid);
       const old = previousState[key];
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
