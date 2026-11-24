@@ -140,7 +140,15 @@ async function runCheck(env, { manual = false } = {}) {
     for (const game of gameIds) {
       const overviewRow = lowById.get(game.id);
       const steamPrice = steamMexicanPrices.get(String(game.appid));
-      const currentPrice = steamPrice?.price;
+      // IsThereAnyDeal ya devuelve el precio actual de la tienda seleccionada en MXN.
+      // Se prioriza este dato; Steam AppDetails queda como respaldo.
+      const itadCurrent = overviewRow?.current && Number(overviewRow.current.shop?.id) === STEAM_SHOP_ID
+        ? overviewRow.current
+        : null;
+      const currentPrice = itadCurrent?.price || steamPrice?.price;
+      const regularPrice = itadCurrent?.regular || (steamPrice
+        ? { amount: steamPrice.regularAmount, currency: steamPrice.price.currency }
+        : null);
       const steamLow = overviewRow?.lowest && Number(overviewRow.lowest.shop?.id) === STEAM_SHOP_ID
         ? overviewRow.lowest
         : null;
@@ -160,8 +168,8 @@ async function runCheck(env, { manual = false } = {}) {
       const currency = "MXN";
       if (!Number.isFinite(currentAmount)) continue;
       checked++;
-      const regularAmount = steamPrice.regularAmount;
-      const discountPercent = steamPrice.discountPercent;
+      const regularAmount = Number(regularPrice?.amount);
+      const discountPercent = Number(itadCurrent?.cut ?? steamPrice?.discountPercent) || 0;
       const key = String(game.appid);
       const old = previousState[key];
       const hasPreviousLow = old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency;
@@ -181,8 +189,8 @@ async function runCheck(env, { manual = false } = {}) {
       let type = null;
       if (isDiscounted && isAtLow && isNewRecord) type = hasHistoricalLow ? "NUEVO MÍNIMO HISTÓRICO" : "NUEVO MÍNIMO REGISTRADO";
       else if (isDiscounted && isAtLow && old && !old.wasAtLow) type = hasHistoricalLow ? "IGUALÓ SU MÍNIMO HISTÓRICO" : "IGUALÓ SU MÍNIMO REGISTRADO";
-      // En la primera sincronización no existe historial local: avisar de ofertas reales sin fingir que son mínimos históricos.
-      else if (isDiscounted && !old) type = "OFERTA ACTIVA (PRIMERA SINCRONIZACIÓN)";
+      // Avisar cuando una oferta aparece, aunque el juego ya tenga un registro de precio anterior.
+      else if (isDiscounted && !old?.wasDiscounted) type = "OFERTA ACTIVA";
 
       if (type) {
         const steamData = await getSteamAppData(game.appid, title);
@@ -212,6 +220,7 @@ async function runCheck(env, { manual = false } = {}) {
         lowAmount,
         lowCurrency: currency,
         wasAtLow: isAtLow,
+        wasDiscounted: isDiscounted,
         checkedAt: new Date().toISOString()
       };
     }
