@@ -1,72 +1,97 @@
 # Steam Historical Low Notifier
 
-Panel web para monitorear la lista pública de deseados de Steam México y recibir notificaciones por Telegram cuando un juego iguala o establece un nuevo mínimo histórico en Steam México.
+Monitor de la lista pública de deseados de Steam México. Envía alertas por Telegram únicamente cuando el precio actual de un juego iguala o rompe su mínimo histórico de Steam México.
 
-## Panel de control
+## Panel
 
-La página principal del Worker incluye:
+El panel del Worker permite:
 
-- **Probar ahora:** ejecuta una revisión inmediata de Steam e IsThereAnyDeal y envía un resumen de la prueba por Telegram.
-- **Periodo de búsqueda:** permite seleccionar cada 1, 3, 6, 12 o 24 horas.
-- **Historial:** conserva hasta 500 notificaciones enviadas, con fecha, juego, precio actual, mínimo histórico y porcentaje de descuento.
-- **Estado:** muestra la configuración de las conexiones y los resultados de la última revisión.
+- Consultar la última revisión y el estado de las conexiones.
+- Ejecutar una revisión manual.
+- Consultar el historial de alertas de mínimos históricos.
+- Ver el precio actual, mínimo histórico, descuento y fecha de notificación.
 
-No requiere contraseña. Cualquier persona que tenga la URL pública del Worker puede abrir el panel, cambiar la frecuencia, consultar el historial y ejecutar una prueba. No se muestran las claves de API ni el token del bot.
+## Tipos de alerta
 
-## Cómo funciona la frecuencia
+- **MÍNIMO HISTÓRICO:** el precio actual iguala el menor precio histórico conocido para Steam México.
+- **NUEVO MÍNIMO HISTÓRICO:** el precio actual queda por debajo del mínimo anterior registrado, o Steam ya está vendiendo al nuevo mínimo menor que el monitor tenía guardado.
 
-Cloudflare ejecuta el Worker una vez por hora. El monitor consulta el intervalo guardado en KV y solo realiza la búsqueda cuando corresponde. El botón **Probar ahora** fuerza una revisión inmediata sin modificar el periodo configurado.
+No se envían alertas por descuentos que sigan por encima del mínimo histórico. El porcentaje de descuento no determina si se genera una alerta: lo determinante es el precio frente al mínimo histórico.
 
-## Qué hace el monitor
+Las alertas se comparan exclusivamente en MXN, para Steam (shop ID 61), país MX. Si no existe un mínimo histórico verificable en MXN, el juego no genera una alerta hasta disponer de esa referencia.
 
-- Lee la wishlist pública de Steam.
-- Convierte los Steam AppID a identificadores de IsThereAnyDeal.
-- Consulta precios y mínimos históricos exclusivamente para Steam y México.
-- Envía alertas de dos tipos:
-  - **IGUALÓ SU MÍNIMO HISTÓRICO:** el precio actual alcanza un mínimo histórico que ya se conocía.
-  - **NUEVO MÍNIMO HISTÓRICO:** IsThereAnyDeal registra un mínimo menor al que se tenía guardado y el precio actual está en ese mínimo.
-- Guarda el estado y el historial en Cloudflare KV para evitar avisos repetidos.
+## Fuentes de precios
 
-El porcentaje de descuento se toma del campo de descuento que devuelve IsThereAnyDeal para el precio actual de Steam.
+El monitor combina:
 
-## Configuración en Cloudflare
+- Steam AppDetails con región México (cc=mx) para el precio actual y precio normal.
+- IsThereAnyDeal /games/storelow/v2 con country=MX&shops=61 para consultar el mínimo histórico por tienda.
+- IsThereAnyDeal /games/overview/v2 como fuente alternativa del mínimo histórico.
+- IsThereAnyDeal /games/prices/v3 con deals=true como fuente alternativa de ofertas.
 
-### 1. Variables secretas
+No se convierten precios de otras monedas a MXN.
 
-En Workers & Pages → steam-historical-low → Settings → Variables and Secrets, agrega como **Secrets**:
+## Cómo evita las alertas repetidas
 
-- `ITAD_API_KEY`: tu clave de IsThereAnyDeal.
-- `TELEGRAM_BOT_TOKEN`: token del bot de Telegram.
-- `TELEGRAM_CHAT_ID`: chat ID donde recibirás los avisos.
+El Worker guarda por juego el mínimo histórico conocido y si el precio actual está en ese mínimo. Así:
+
+- No repite la misma alerta en cada revisión mientras el juego siga al mismo precio mínimo.
+- Puede volver a avisar si el juego sale del mínimo y posteriormente lo alcanza otra vez.
+- Notifica un nuevo récord cuando el precio baja por debajo del mínimo que ya tenía registrado.
+
+El historial de notificaciones se guarda por separado del estado de precios. El historial conserva hasta 500 alertas.
+
+## Horarios
+
+Revisiones automáticas todos los días:
+
+- 8:00 a. m.
+- 12:05 p. m.
+
+Zona horaria: America/Monterrey.
+
+## Configuración de Cloudflare
+
+### Secretos
+
+En Workers & Pages → steam-historical-low → Settings → Variables and Secrets, configura como secretos:
+
+- ITAD_API_KEY
+- TELEGRAM_BOT_TOKEN
+- TELEGRAM_CHAT_ID
 
 No guardes estos valores en GitHub.
 
-### 2. KV
+### KV
 
-El archivo `wrangler.jsonc` utiliza el namespace existente mediante el binding `KV`.
+El Worker utiliza el namespace existente mediante el binding KV.
 
-### 3. Workers Builds
+Claves de estado:
 
-- Repositorio: `LuisMtz21/steam-historical-low`
-- Rama: `main`
-- Directorio raíz: `/`
-- Comando de despliegue: `npx wrangler deploy`
+- wishlist-state-v1: mínimo histórico conocido por juego y estado de alerta.
+- notification-history-v1: historial de alertas.
+- last-run-v1 y last-result-v1: datos de la última revisión.
+- telegram-test-sent: evita repetir el mensaje inicial de configuración.
 
-Los archivos estáticos del panel están en `public/`.
+### Despliegue automático
 
-### 4. Cron
+Workers Builds está conectado al repositorio LuisMtz21/steam-historical-low, rama main, con comando:
 
-El Cron configurado es `0 * * * *` (una vez por hora, en UTC). La frecuencia efectiva se controla desde el panel y se almacena en KV.
+    npx wrangler deploy
 
-## Primera ejecución
+Los archivos del panel están en public/.
 
-La primera revisión crea la línea base del monitor. No envía alertas por descuentos que ya estaban activos antes de instalarlo. El panel permite ejecutar una prueba manual cuando quieras.
+## Primera revisión después de reiniciar el historial
 
-## Notas
+La primera revisión vuelve a consultar los mínimos históricos directamente en IsThereAnyDeal. Si un juego ya está al mínimo, puede generar una alerta inicial. Después se guarda la línea base para detectar nuevos mínimos y evitar duplicados.
 
-- País consultado: `MX`.
-- Tienda consultada: Steam (shop ID 61 de IsThereAnyDeal).
-- Las comparaciones se hacen en la moneda devuelta por la API; si las monedas no coinciden, el juego se omite.
-- Los juegos que IsThereAnyDeal no identifica se omiten.
-- El historial conserva las últimas 500 notificaciones.
-- El proyecto no está afiliado a Steam ni a IsThereAnyDeal. Consulta y respeta las condiciones de uso de sus servicios.
+## Datos del proyecto
+
+- País: México (MX).
+- Tienda: Steam (61).
+- Moneda de comparación: MXN.
+- Estado y notificaciones: Cloudflare KV.
+- Automatización: Cloudflare Workers Cron.
+- Notificaciones: Telegram.
+
+El proyecto no está afiliado a Steam ni a IsThereAnyDeal.
