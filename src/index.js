@@ -231,7 +231,11 @@ async function runCheck(env, { manual = false } = {}) {
           : null;
       const steamLow = storeLowById.get(game.id) || overviewLow || null;
       const hasCurrentPrice = Boolean(currentPrice && currentPrice.currency === "MXN");
-      const hasHistoricalLow = Boolean(steamLow?.price && steamLow.price.currency === "MXN");
+      const hasHistoricalLow = Boolean(
+        steamLow?.price &&
+        steamLow.price.currency === "MXN" &&
+        Number.isFinite(Number(steamLow.price.amount))
+      );
       if (!steamLow) withoutAnyHistoricalLow++;
       else if (steamLow.price?.currency !== "MXN") historicalLowOtherCurrency++;
       const anyNonMexicanPrice = itadDeal?.price || itadCurrent?.price || steamPrice?.price;
@@ -241,8 +245,6 @@ async function runCheck(env, { manual = false } = {}) {
         else withoutCurrentPrice++;
         continue;
       }
-      if (!hasHistoricalLow) withoutComparableHistoricalLow++;
-
       const currentAmount = Number(currentPrice.amount);
       const currency = "MXN";
       if (!Number.isFinite(currentAmount)) continue;
@@ -296,7 +298,9 @@ async function runCheck(env, { manual = false } = {}) {
           price: currentAmount,
           regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
           historicalLow: isNewRecord ? currentAmount : comparisonLow,
-          previousHistoricalLow: isNewRecord ? comparisonLow : null,
+          previousHistoricalLow: isNewRecord
+            ? (hasPreviousLow ? previousLowAmount : itadLowAmount)
+            : null,
           historicalLowSource: lowSource,
           currency,
           discountPercent,
