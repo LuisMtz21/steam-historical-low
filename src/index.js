@@ -185,7 +185,6 @@ async function runCheck(env, { manual = false } = {}) {
       else if (isDiscounted && !old) type = "OFERTA ACTIVA (PRIMERA SINCRONIZACIÓN)";
 
       if (type) {
-        if (notifications.length >= MAX_ALERTS_PER_RUN) continue;
         const steamData = await getSteamAppData(game.appid, title);
         title = steamData.name;
         const notification = {
@@ -231,6 +230,7 @@ async function runCheck(env, { manual = false } = {}) {
   }
 
   notifications.sort((a, b) => b.discountPercent - a.discountPercent);
+  notifications.splice(MAX_ALERTS_PER_RUN);
 
   for (const notification of notifications) {
     await sendTelegramPhoto(env, notification);
