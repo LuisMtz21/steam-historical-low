@@ -83,6 +83,12 @@ async function getSettings(env) {
 async function runCheck(env, { manual = false } = {}) {
   requireSecrets(env);
   const startedAt = new Date().toISOString();
+  if (!env.STEAM_INDEX_API_KEY) {
+    return {
+      skipped: true,
+      reason: "Falta configurar STEAM_INDEX_API_KEY para consultar mínimos históricos en MXN."
+    };
+  }
   const lockKey = "run-lock-v1";
   const lockedAt = await env.KV.get(lockKey);
   if (lockedAt && Date.now() - Date.parse(lockedAt) < 15 * 60 * 1000) {
@@ -626,7 +632,7 @@ function formatDiscountExpiration(value) {
 }
 
 function requireSecrets(env) {
-  for (const name of ["STEAM_INDEX_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) {
+  for (const name of ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]) {
     if (!env[name]) throw new Error(`Falta configurar el secreto ${name} en Cloudflare.`);
   }
 }
