@@ -289,8 +289,8 @@ async function runCheck(env, { manual = false } = {}) {
       const epsilon = 0.000001;
 
       // Un récord se confirma cuando el precio actual queda por debajo del mínimo conocido,
-      // o cuando ITAD ya registra un mínimo menor al que el monitor tenía guardado y Steam
-      // está vendiendo precisamente a ese nuevo mínimo.
+      // o cuando Steam Index ya registra un mínimo menor al que el monitor tenía guardado
+      // y Steam está vendiendo precisamente a ese nuevo mínimo.
       const isNewRecord = hasHistoricalReference && (
         currentAmount < comparisonLow - epsilon ||
         (hasPreviousLow && hasHistoricalLow &&
@@ -405,7 +405,7 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Sin precio regional MXN de Steam: ${withoutMexicanPrice}`,
       `Sin ningún mínimo histórico de Steam: ${withoutAnyHistoricalLow}`,
-      `Mínimo histórico disponible en otra moneda: ${historicalLowOtherCurrency}`,
+      `Mínimos históricos de ITAD en otra moneda: ${historicalLowOtherCurrencyCount}`,
       `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
       `Steam Index API: ${env.STEAM_INDEX_API_KEY ? "configurado" : "NO CONFIGURADO"}`,
       `Historiales MXN consultados en Steam Index: ${steamIndexHistoryRequestsCount}`,
