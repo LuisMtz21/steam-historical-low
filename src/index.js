@@ -230,7 +230,7 @@ async function runCheck(env, { manual = false } = {}) {
     const lowSource = steamIndexLow
       ? "Steam Index · Steam México (desde septiembre de 2026)"
       : "mínimo histórico guardado por el monitor";
-    const title = old?.title || "Steam App " + appid;
+    const title = old?.title || steamPrice?.title || "Steam App " + appid;
 
     let type = null;
     if (isNewRecord) type = "NUEVO MÍNIMO REGISTRADO";
@@ -493,7 +493,7 @@ async function getSteamMexicanPrices(appids, env) {
       const appid = String(app.appId);
       const price = app.price;
       if (
-        !/^\\d+$/.test(appid) ||
+        !/^\d+$/.test(appid) ||
         !price ||
         price.currency !== "MXN" ||
         !Number.isFinite(Number(price.finalPrice)) ||
