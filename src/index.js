@@ -105,6 +105,8 @@ async function runCheck(env, { manual = false } = {}) {
   const notifications = [];
   let withoutMexicanPrice = 0;
   let withoutComparableHistoricalLow = 0;
+  let withoutAnyHistoricalLow = 0;
+  let historicalLowOtherCurrency = 0;
   let mapped = 0;
   let checked = 0;
   let withoutCurrentPrice = 0;
@@ -127,20 +129,25 @@ async function runCheck(env, { manual = false } = {}) {
 
     const ids = gameIds.map(game => game.id);
     const query = `country=${COUNTRY}&shops=${STEAM_SHOP_ID}`;
-    const [storeLows, steamMexicanPrices] = await Promise.all([
-      itadPost(`https://api.isthereanydeal.com/games/storelow/v2?${query}`, env, ids),
+    const [overview, steamMexicanPrices] = await Promise.all([
+      itadPost(`https://api.isthereanydeal.com/games/overview/v2?${query}`, env, ids),
       getSteamMexicanPrices(batch)
     ]);
 
-    const lowById = new Map((storeLows || []).map(row => [row.id, row]));
+    // Overview entrega el mínimo histórico de la tienda seleccionada junto con el precio actual.
+    const lowById = new Map((overview?.prices || []).map(row => [row.id, row]));
 
     for (const game of gameIds) {
-      const lowRow = lowById.get(game.id);
+      const overviewRow = lowById.get(game.id);
       const steamPrice = steamMexicanPrices.get(String(game.appid));
       const currentPrice = steamPrice?.price;
-      const steamLow = lowRow?.lows?.find(low => Number(low.shop?.id ?? low.shop) === STEAM_SHOP_ID);
+      const steamLow = overviewRow?.lowest && Number(overviewRow.lowest.shop?.id) === STEAM_SHOP_ID
+        ? overviewRow.lowest
+        : null;
       const hasCurrentPrice = Boolean(currentPrice && currentPrice.currency === "MXN");
       const hasHistoricalLow = Boolean(steamLow?.price && steamLow.price.currency === "MXN");
+      if (!steamLow) withoutAnyHistoricalLow++;
+      else if (steamLow.price?.currency !== "MXN") historicalLowOtherCurrency++;
       if (currentPrice && currentPrice.currency !== "MXN") withoutMexicanPrice++;
       if (!hasCurrentPrice) {
         if (!hasHistoricalLow) withoutBothPrices++;
@@ -174,6 +181,8 @@ async function runCheck(env, { manual = false } = {}) {
       let type = null;
       if (isDiscounted && isAtLow && isNewRecord) type = hasHistoricalLow ? "NUEVO MÍNIMO HISTÓRICO" : "NUEVO MÍNIMO REGISTRADO";
       else if (isDiscounted && isAtLow && old && !old.wasAtLow) type = hasHistoricalLow ? "IGUALÓ SU MÍNIMO HISTÓRICO" : "IGUALÓ SU MÍNIMO REGISTRADO";
+      // En la primera sincronización no existe historial local: avisar de ofertas reales sin fingir que son mínimos históricos.
+      else if (isDiscounted && !old) type = "OFERTA ACTIVA (PRIMERA SINCRONIZACIÓN)";
 
       if (type) {
         if (notifications.length >= MAX_ALERTS_PER_RUN) continue;
@@ -186,8 +195,8 @@ async function runCheck(env, { manual = false } = {}) {
           appid: game.appid,
           price: currentAmount,
           regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
-          historicalLow: hasHistoricalLow ? itadLowAmount : comparisonLow,
-          historicalLowSource: lowSource,
+          historicalLow: hasHistoricalLow ? itadLowAmount : (hasPreviousLow ? comparisonLow : null),
+          historicalLowSource: hasHistoricalLow ? lowSource : (hasPreviousLow ? "registro del monitor" : "no disponible"),
           currency,
           discountPercent,
           cover: steamData.cover,
@@ -240,6 +249,8 @@ async function runCheck(env, { manual = false } = {}) {
       `Sin precio actual: ${withoutCurrentPrice}`,
       `Sin ninguno de los dos datos: ${withoutBothPrices}`,
       `Sin precio regional MXN de Steam: ${withoutMexicanPrice}`,
+      `Sin ningún mínimo histórico de Steam: ${withoutAnyHistoricalLow}`,
+      `Mínimo histórico disponible en otra moneda: ${historicalLowOtherCurrency}`,
       `Sin mínimo histórico comparable en MXN: ${withoutComparableHistoricalLow}`,
       `Notificaciones nuevas: ${notifications.length}`,
       `Horarios automáticos: 8:00 a. m. y 12:05 p. m. (Monterrey).`,
@@ -418,7 +429,9 @@ function formatAlert(item) {
     `🎮 ${item.type}`,
     item.title,
     `Precio actual: ${money(item.price)} MXN`,
-    `Mínimo ${item.historicalLowSource === "registro del monitor" ? "registrado por el monitor" : "histórico Steam México"}: ${money(item.historicalLow)} MXN`,
+    item.historicalLow === null || !Number.isFinite(Number(item.historicalLow))
+      ? "Mínimo histórico: todavía no disponible en MXN"
+      : `Mínimo ${item.historicalLowSource === "registro del monitor" ? "registrado por el monitor" : "histórico Steam México"}: ${money(item.historicalLow)} MXN`,
     `Descuento: ${item.discountPercent}%`,
     `Descuento válido hasta: ${formatDiscountExpiration(item.discountExpiration)}`,
     item.url,
