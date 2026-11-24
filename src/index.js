@@ -1,6 +1,6 @@
 const STEAM_ID = "76561198124362092";
-const STEAM_SHOP_ID = 61;
-const COUNTRY = "MX";
+const WORKER_BASE_URL = "https://steam-historical-low.luismtz21.workers.dev";
+const HISTORY_BATCH_SIZE = 50;
 const STATE_KEY = "wishlist-state-v1";
 const HISTORY_KEY = "notification-history-v1";
 const SETTINGS_KEY = "monitor-settings-v1";
@@ -14,6 +14,16 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
       try {
+        if (request.method === "POST" && url.pathname === "/api/internal/steam-index-history") {
+          if (!env.STEAM_INDEX_API_KEY || request.headers.get("x-internal-token") !== env.STEAM_INDEX_API_KEY) {
+            return json({ ok: false, error: "No autorizado." }, 404);
+          }
+          const body = await request.json();
+          const appids = [...new Set((body.appids || []).map(String).filter(id => /^\d+$/.test(id)))].slice(0, HISTORY_BATCH_SIZE);
+          const lows = await getSteamIndexHistoricalLowsDirect(appids, env);
+          return json({ ok: true, lows: Object.fromEntries(lows) });
+        }
+
         if (request.method === "GET" && url.pathname === "/api/status") {
           return json({
             ok: true,
@@ -24,7 +34,6 @@ export default {
             historyCount: (await env.KV.get(HISTORY_KEY, "json") || []).filter(item => item.currency === "MXN").length,
             connections: {
               steam: true,
-              itad: Boolean(env.ITAD_API_KEY),
               telegram: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
               steamIndex: Boolean(env.STEAM_INDEX_API_KEY),
               storage: Boolean(env.KV)
