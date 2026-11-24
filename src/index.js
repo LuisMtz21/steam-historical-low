@@ -79,8 +79,9 @@ async function runCheck(env, { manual = false } = {}) {
     return { skipped: true, reason: "Ya hay una revisión en curso." };
   }
   await env.KV.put(lockKey, startedAt, { expirationTtl: 900 });
+  try {
   const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=${STEAM_ID}`;
-  const wishlistResponse = await fetch(wishlistUrl);
+  const wishlistResponse = await fetch(wishlistUrl, { signal: AbortSignal.timeout(20000) });
   if (!wishlistResponse.ok) {
     throw new Error(`Steam wishlist respondió HTTP ${wishlistResponse.status}`);
   }
@@ -350,9 +351,19 @@ async function runCheck(env, { manual = false } = {}) {
     manual
   };
   await saveRun(env, result);
-  await env.KV.delete(lockKey);
+  await env.KV.delete("last-error-v1");
   console.log(JSON.stringify(result));
   return result;
+  } catch (error) {
+    await env.KV.put("last-error-v1", JSON.stringify({
+      at: new Date().toISOString(),
+      message: error?.message || String(error)
+    }));
+    console.error("Falló la revisión de wishlist:", error);
+    throw error;
+  } finally {
+    await env.KV.delete(lockKey);
+  }
 }
 
 async function saveRun(env, result) {
@@ -365,7 +376,10 @@ async function getSteamMexicanPrices(appids) {
   for (let offset = 0; offset < appids.length; offset += 100) {
     const batch = appids.slice(offset, offset + 100);
     const url = "https://store.steampowered.com/api/appdetails/?appids=" + batch.join(",") + "&cc=mx&l=spanish&filters=price_overview";
-    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" } });
+    const response = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" },
+      signal: AbortSignal.timeout(20000)
+    });
     if (!response.ok) throw new Error("Steam México respondió HTTP " + response.status + " al consultar precios regionales.");
     const data = await response.json();
     for (const appid of batch) {
@@ -390,7 +404,8 @@ async function itadPost(url, env, body) {
       "Content-Type": "application/json",
       "Accept": "application/json"
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20000)
   });
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500);
@@ -408,7 +423,8 @@ async function sendTelegram(env, text) {
       chat_id: env.TELEGRAM_CHAT_ID,
       text,
       disable_web_page_preview: true
-    })
+    }),
+    signal: AbortSignal.timeout(15000)
   });
   const result = await response.json();
   if (!response.ok || !result.ok) {
@@ -424,7 +440,8 @@ async function sendTelegramPhoto(env, item) {
     const response = await fetch(telegramUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, photo: photoUrl, caption: formatAlert(item) })
+      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, photo: photoUrl, caption: formatAlert(item) }),
+      signal: AbortSignal.timeout(15000)
     });
     const result = await response.json();
     if (response.ok && result.ok) return;
@@ -440,7 +457,8 @@ async function getSteamAppData(appid, fallback) {
   try {
     // Una sola consulta a Steam por juego, usando la región México.
     const response = await fetch("https://store.steampowered.com/api/appdetails/?appids=" + appid + "&cc=mx&l=spanish", {
-      headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" }
+      headers: { "User-Agent": "Mozilla/5.0 Steam Historical Low Notifier" },
+      signal: AbortSignal.timeout(15000)
     });
     if (response.ok) {
       const data = await response.json();
