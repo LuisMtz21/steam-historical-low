@@ -165,7 +165,7 @@ async function runCheck(env, { manual = false } = {}) {
     const storeLowById = new Map((storeLows || []).map(row => [
       row.id,
       (row.lows || [])
-        .filter(low => Number(low.shop?.id) === STEAM_SHOP_ID && low.price?.currency === "MXN" && Number.isFinite(Number(low.price.amount)))
+        .filter(low => Number(low.shop?.id) === STEAM_SHOP_ID && low.price?.currency === "MXN" && low.price.amount !== null && low.price.amount !== undefined && Number.isFinite(Number(low.price.amount)))
         .sort((a, b) => Number(a.price.amount) - Number(b.price.amount))[0] || null
     ]));
 
@@ -234,6 +234,8 @@ async function runCheck(env, { manual = false } = {}) {
       const hasHistoricalLow = Boolean(
         steamLow?.price &&
         steamLow.price.currency === "MXN" &&
+        steamLow.price.amount !== null &&
+        steamLow.price.amount !== undefined &&
         Number.isFinite(Number(steamLow.price.amount))
       );
       if (!steamLow) withoutAnyHistoricalLow++;
@@ -252,10 +254,16 @@ async function runCheck(env, { manual = false } = {}) {
       const regularAmount = Number(regularPrice?.amount);
       const key = String(game.appid);
       const old = previousState[key];
-      const hasPreviousLow = Boolean(old && Number.isFinite(Number(old.lowAmount)) && old.lowCurrency === currency);
+      const hasPreviousLow = Boolean(
+        old &&
+        old.lowAmount !== null &&
+        old.lowAmount !== undefined &&
+        Number.isFinite(Number(old.lowAmount)) &&
+        old.lowCurrency === currency
+      );
       const previousLowAmount = hasPreviousLow ? Number(old.lowAmount) : null;
       const itadLowAmount = hasHistoricalLow ? Number(steamLow.price.amount) : null;
-      const knownLows = [previousLowAmount, itadLowAmount].filter(value => Number.isFinite(value) && value > 0);
+      const knownLows = [previousLowAmount, itadLowAmount].filter(value => Number.isFinite(value) && value >= 0);
       const comparisonLow = knownLows.length ? Math.min(...knownLows) : null;
       const hasHistoricalReference = comparisonLow !== null;
       const isDiscounted = discountPercent > 0 && Number.isFinite(regularAmount) && currentAmount < regularAmount;
@@ -299,7 +307,9 @@ async function runCheck(env, { manual = false } = {}) {
           regularPrice: Number.isFinite(regularAmount) ? regularAmount : null,
           historicalLow: isNewRecord ? currentAmount : comparisonLow,
           previousHistoricalLow: isNewRecord
-            ? (hasPreviousLow ? previousLowAmount : itadLowAmount)
+            ? (hasHistoricalLow && currentAmount < itadLowAmount - epsilon
+              ? itadLowAmount
+              : (hasPreviousLow ? previousLowAmount : itadLowAmount))
             : null,
           historicalLowSource: lowSource,
           currency,
@@ -418,6 +428,7 @@ async function runCheck(env, { manual = false } = {}) {
       storeLowRows: storeLowRowsCount,
       storeLowMatchedMx: storeLowMatchedMxCount,
       storeLowOtherCurrency: storeLowOtherCurrencyCount,
+      withoutAnyHistoricalLow,
       alertsFoundBeforeLimit,
       selectedFromSteam: selectedFromSteamCount,
       selectedFromItadOverview: selectedFromItadOverviewCount,
