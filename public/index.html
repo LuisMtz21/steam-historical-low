@@ -20,7 +20,7 @@
 </header>
 <section class="grid">
  <div class="card"><div class="stat-label">Juegos en wishlist</div><div class="stat-value" id="wishlistCount">—</div><div class="stat-foot">Lista pública de Steam</div></div>
- <div class="card"><div class="stat-label">Juegos identificados</div><div class="stat-value" id="mappedCount">—</div><div class="stat-foot">En IsThereAnyDeal</div></div>
+ <div class="card"><div class="stat-label">Juegos identificados</div><div class="stat-value" id="mappedCount">—</div><div class="stat-foot">En Steam</div></div>
  <div class="card"><div class="stat-label">Notificaciones guardadas</div><div class="stat-value" id="historyCount">—</div><div class="stat-foot">Historial de alertas</div></div>
  <div class="card"><div class="stat-label">Horarios automáticos</div><div class="stat-value" id="scheduleLabel">8:00 AM / 12:05 PM</div><div class="stat-foot">Hora local de Monterrey</div></div>
 </section>
@@ -59,10 +59,10 @@ async function loadStatus(){
   $("mainStatus").textContent="Monitor conectado";
   setDot("mainDot",true);
   $("wishlistCount").textContent=last.wishlistGames??"—";
-  $("mappedCount").textContent=last.gamesMappedToItad??"—";
+  $("mappedCount").textContent=last.gamesIdentified??"—";
   $("historyCount").textContent=s.historyCount??0;
   $("scheduleLabel").textContent="8:00 AM / 12:05 PM";
-  $("connections").innerHTML=[["Steam",s.connections.steam],["IsThereAnyDeal",s.connections.itad],["Steam Index",s.connections.steamIndex],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");
+  $("connections").innerHTML=[["Steam",s.connections.steam],["Steam Index",s.connections.steamIndex],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");
   if(s.lastRun){
    $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":("Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Historiales Steam Index MXN: "+(d.steamIndexHistoryMatchedMx??0)+".");
   }else{
