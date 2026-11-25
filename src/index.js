@@ -353,7 +353,7 @@ async function runCheck(env, { manual = false, reportManual = true } = {}) {
     await env.KV.put(HISTORY_CURSOR_KEY, historyBatchCandidates[historyBatchCandidates.length - 1]);
   }
 
-  if (manual) {
+  if (manual && reportManual) {
     const settings = await getSettings(env);
     await sendTelegram(env, [
       "🧪 PRUEBA MANUAL COMPLETADA",
