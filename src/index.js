@@ -394,21 +394,13 @@ async function getSteamIndexHistoricalLows(games, env) {
   for (let offset = 0; offset < games.length; offset += HISTORY_BATCH_SIZE) {
     if (offset > 0) await new Promise(resolve => setTimeout(resolve, 61000));
     const batch = games.slice(offset, offset + HISTORY_BATCH_SIZE);
-    const response = await fetch(WORKER_BASE_URL + "/api/internal/steam-index-history", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-token": env.STEAM_INDEX_API_KEY
-      },
-      body: JSON.stringify({ appids: batch.map(game => String(game.appid)) }),
-      signal: AbortSignal.timeout(180000)
-    });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 500);
-      throw new Error("No se pudo consultar el lote de mínimos de Steam Index: HTTP " + response.status + ": " + detail);
-    }
-    const result = await response.json();
-    for (const [appid, low] of Object.entries(result.lows || {})) lows.set(appid, low);
+    // Consulta Steam Index directamente desde esta ejecución. Evita una
+    // petición HTTP del Worker hacia su propio dominio, que puede terminar en 522.
+    const batchLows = await getSteamIndexHistoricalLowsDirect(
+      batch.map(game => String(game.appid)),
+      env
+    );
+    for (const [appid, low] of batchLows) lows.set(appid, low);
   }
   return lows;
 }
