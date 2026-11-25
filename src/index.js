@@ -117,12 +117,12 @@ async function runCheck(env, { manual = false, reportManual = true } = {}) {
   const lockKey = "run-lock-v1";
   const lockedAt = await env.KV.get(lockKey);
   const lockAge = lockedAt ? Date.now() - Date.parse(lockedAt) : Infinity;
-  if (lockedAt && Number.isFinite(lockAge) && lockAge < 45 * 1000) {
+  if (lockedAt && Number.isFinite(lockAge) && lockAge < 60 * 1000) {
     return { skipped: true, reason: "Ya hay una revisión en curso." };
   }
   // Recuperar bloqueos abandonados; cada ejecución normal termina en pocos segundos.
   if (lockedAt) await env.KV.delete(lockKey);
-  await env.KV.put(lockKey, startedAt, { expirationTtl: 45 });
+  await env.KV.put(lockKey, startedAt, { expirationTtl: 60 });
   try {
   const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=${STEAM_ID}`;
   const wishlistResponse = await fetch(wishlistUrl, { signal: AbortSignal.timeout(20000) });
