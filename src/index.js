@@ -1,6 +1,8 @@
 const STEAM_ID = "76561198124362092";
 const WORKER_BASE_URL = "https://steam-historical-low.luismtz21.workers.dev";
 const HISTORY_BATCH_SIZE = 50;
+const HISTORY_CHECKS_PER_RUN = 10;
+const HISTORY_CURSOR_KEY = "steam-index-history-cursor-v1";
 const STATE_KEY = "wishlist-state-v1";
 const HISTORY_KEY = "notification-history-v1";
 const SETTINGS_KEY = "monitor-settings-v1";
@@ -157,11 +159,23 @@ async function runCheck(env, { manual = false } = {}) {
     return isAtOrBelowOldLow || retryMissingHistory;
   });
 
+  // Cloudflare Free permite 50 subrequests externos por ejecución.
+  // Procesamos 10 historiales por revisión y rotamos el cursor para completar
+  // la wishlist en varias ejecuciones sin superar ese límite.
+  const historyCursor = await env.KV.get(HISTORY_CURSOR_KEY);
+  const cursorIndex = appids.indexOf(String(historyCursor));
+  const historyCandidateSet = new Set(historyCandidates);
+  const historyBatchCandidates = [];
+  for (let step = 1; step <= appids.length && historyBatchCandidates.length < HISTORY_CHECKS_PER_RUN; step++) {
+    const candidate = appids[(cursorIndex + step + appids.length) % appids.length];
+    if (historyCandidateSet.has(candidate)) historyBatchCandidates.push(candidate);
+  }
+
   const steamIndexLows = await getSteamIndexHistoricalLows(
-    historyCandidates.map(appid => ({ appid })),
+    historyBatchCandidates.map(appid => ({ appid })),
     env
   );
-  steamIndexHistoryRequestsCount = historyCandidates.length;
+  steamIndexHistoryRequestsCount = historyBatchCandidates.length;
   steamIndexHistoryMatchedMxCount = [...steamIndexLows.values()].filter(Boolean).length;
 
   for (const appid of appids) {
@@ -312,6 +326,9 @@ async function runCheck(env, { manual = false } = {}) {
 
   // Persistimos el estado después de confirmar los envíos para no perder alertas si Telegram falla.
   await env.KV.put(STATE_KEY, JSON.stringify(nextState));
+  if (historyBatchCandidates.length) {
+    await env.KV.put(HISTORY_CURSOR_KEY, historyBatchCandidates[historyBatchCandidates.length - 1]);
+  }
 
   if (manual) {
     const settings = await getSettings(env);
