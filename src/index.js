@@ -54,8 +54,26 @@ export default {
 
         if (request.method === "POST" && url.pathname === "/api/run") {
           requireSecrets(env);
-          const result = await runCheck(env, { manual: true });
+          const body = await request.json().catch(() => ({}));
+          const result = await runCheck(env, { manual: true, reportManual: body.reportManual !== false });
           return json({ ok: true, result });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/report") {
+          requireSecrets(env);
+          const body = await request.json();
+          await sendTelegram(env, [
+            "🧪 REVISIÓN MANUAL COMPLETADA",
+            `Juegos en wishlist: ${Number(body.wishlistGames) || 0}`,
+            `Juegos con precios MXN revisados: ${Number(body.gamesChecked) || 0}`,
+            `Historiales consultados en Steam Index: ${Number(body.historyRequests) || 0}`,
+            `Mínimos históricos MXN obtenidos: ${Number(body.historyMatched) || 0}`,
+            `Alertas enviadas: ${Number(body.alerts) || 0}`,
+            `Nuevos récords: ${Number(body.newRecords) || 0}`,
+            `Mínimos alcanzados: ${Number(body.atLows) || 0}`,
+            "Precios comparados exclusivamente en Steam México (MXN)."
+          ].join("\\n"));
+          return json({ ok: true });
         }
 
         return json({ ok: false, error: "Ruta no encontrada." }, 404);
@@ -82,7 +100,7 @@ async function getSettings(env) {
   };
 }
 
-async function runCheck(env, { manual = false } = {}) {
+async function runCheck(env, { manual = false, reportManual = true } = {}) {
   requireSecrets(env);
   const startedAt = new Date().toISOString();
   if (!env.STEAM_INDEX_API_KEY) {
@@ -385,6 +403,8 @@ async function runCheck(env, { manual = false } = {}) {
       steamIndexConfigured: Boolean(env.STEAM_INDEX_API_KEY),
       steamIndexHistoryRequests: steamIndexHistoryRequestsCount,
       steamIndexHistoryMatchedMx: steamIndexHistoryMatchedMxCount,
+      steamIndexHistoryCandidates: historyCandidates.length,
+      steamIndexHistoryPending: Math.max(0, historyCandidates.length - historyBatchCandidates.length),
       withoutAnyHistoricalLow,
       alertsFoundBeforeLimit,
     },
