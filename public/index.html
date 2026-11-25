@@ -43,12 +43,13 @@
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
+let isRunning=false;
 const money=(n,c="MXN")=>new Intl.NumberFormat("es-MX",{style:"currency",currency:c,maximumFractionDigits:2}).format(Number(n)||0);
 function displayMoney(value,item){const currency=item.currency||"MXN";return money(Number(value)||0,currency)}
 function expiration(value){if(value===null||value===undefined||value===""||Number(value)===0)return "No disponible";let v=value;if(typeof v==="number"||/^\d+$/.test(String(v))){v=Number(v);if(v<1000000000000)v*=1000;}const d=new Date(v);return Number.isNaN(d.getTime())?"No disponible":new Intl.DateTimeFormat("es-MX",{dateStyle:"medium",timeStyle:"short",timeZone:"America/Monterrey"}).format(d)}
 function date(v){return v?new Intl.DateTimeFormat("es-MX",{dateStyle:"medium",timeStyle:"short"}).format(new Date(v)):"—"}
 function coverFallback(img){const app=img.dataset.appid;const step=Number(img.dataset.step||0);const urls=["https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/"+app+"/header.jpg","https://cdn.akamai.steamstatic.com/steam/apps/"+app+"/header.jpg","https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/"+app+"/capsule_231x87.jpg"];if(step<urls.length){img.dataset.step=String(step+1);img.src=urls[step]}else{img.onerror=null;img.style.display="none"}}
-async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const data=await r.json();if(!r.ok||data.ok===false)throw new Error(data.error||"No se pudo completar la solicitud.");return data}
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const data=await r.json();if(!r.ok||data.ok===false){const e=new Error(data.error||"No se pudo completar la solicitud.");e.status=r.status;e.retryAfter=Number(data.retryAfter)||60;throw e;}return data}
 function toast(message){$("toast").textContent=message;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),3500)}
 function setDot(el,ok){$(el).className=ok?"dot ok":"dot"}
 async function loadStatus(){
@@ -63,10 +64,12 @@ async function loadStatus(){
   $("historyCount").textContent=s.historyCount??0;
   $("scheduleLabel").textContent="8:00 AM / 12:05 PM";
   $("connections").innerHTML=[["Steam",s.connections.steam],["Steam Index",s.connections.steamIndex],["Telegram",s.connections.telegram],["KV",s.connections.storage]].map(([name,ok])=>'<span class="chip"><i class="dot '+(ok?"ok":"")+'"></i>'+name+'</span>').join("");
-  if(s.lastRun){
-   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":("Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Historiales Steam Index MXN: "+(d.steamIndexHistoryMatchedMx??0)+" (desde septiembre de 2026).");
-  }else{
-   $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":"Historial reiniciado. La primera revisión establecerá la línea base de mínimos registrados por Steam Index desde septiembre de 2026.";
+  if(!isRunning){
+   if(s.lastRun){
+    $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":("Última revisión: "+date(s.lastRun)+" · "+(last.gamesChecked??0)+" juegos revisados · "+(last.alerts??0)+" alertas de mínimo histórico · Nuevos récords: "+(last.newHistoricalLow??0)+" · Mínimos alcanzados: "+(last.atHistoricalLow??0)+" · Historiales consultados: "+(d.steamIndexHistoryRequests??0)+" · Mínimos históricos encontrados: "+(d.steamIndexHistoryMatchedMx??0)+".");
+   }else{
+    $("runResult").textContent=!s.connections.steamIndex?"Falta configurar STEAM_INDEX_API_KEY para consultar el historial regional de Steam en MXN.":"Historial reiniciado. La primera revisión establecerá la línea base de mínimos registrados por Steam Index desde septiembre de 2026.";
+   }
   }
  }catch(e){
   $("mainStatus").textContent="No se pudo conectar";
@@ -94,39 +97,53 @@ async function loadHistory(){
 }
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function runNow(){
+ if(isRunning)return;
  const b=$("runButton");
+ isRunning=true;
  b.disabled=true;
  let totalHistoryRequests=0,totalHistoryMatched=0,totalAlerts=0,totalNewRecords=0,totalAtLows=0;
- let wishlistGames=0,gamesChecked=0,totalCandidates=0,pending=0,attempts=0;
- $("runResult").textContent="Iniciando revisión completa. Se consultarán todos los mínimos históricos por lotes para respetar los límites de Steam Index.";
+ let wishlistGames=0,gamesChecked=0,totalCandidates=0,pending=0,lockRetries=0;
+ $("runResult").textContent="Iniciando revisión completa. Se consultarán todos los historiales por lotes, respetando el límite de Steam Index.";
  try{
   do{
-   const data=await api("/api/run",{method:"POST",body:JSON.stringify({reportManual:false})});
+   let data;
+   try{
+    data=await api("/api/run",{method:"POST",body:JSON.stringify({reportManual:false})});
+   }catch(e){
+    if(e.status===429){
+     const wait=Math.max(5,e.retryAfter||60);
+     $("runResult").textContent="Steam Index aplicó su límite temporal. Reintentando automáticamente en "+wait+" segundos; no necesitas volver a pulsar.";
+     await new Promise(resolve=>setTimeout(resolve,(wait+2)*1000));
+     continue;
+    }
+    throw e;
+   }
    const r=data.result||{};
    if(r.skipped){
-    if((r.reason||"").includes("Ya hay una revisión en curso")&&attempts++<10){
-     $("runResult").textContent="Esperando a que termine otra revisión…";
-     await new Promise(resolve=>setTimeout(resolve,3000));
+    if((r.reason||"").includes("Ya hay una revisión en curso")&&lockRetries++<24){
+     $("runResult").textContent="Esperando a que se libere la ejecución anterior…";
+     await new Promise(resolve=>setTimeout(resolve,5000));
      continue;
     }
     throw new Error(r.reason||"La revisión no pudo iniciar.");
    }
+   lockRetries=0;
    const d=r.diagnostics||{};
-   wishlistGames=r.wishlistGames||wishlistGames;
-   gamesChecked=r.gamesChecked||gamesChecked;
+   wishlistGames=Number(r.wishlistGames)||wishlistGames;
+   gamesChecked=Number(r.gamesChecked)||gamesChecked;
    totalHistoryRequests+=Number(d.steamIndexHistoryRequests)||0;
    totalHistoryMatched+=Number(d.steamIndexHistoryMatchedMx)||0;
    totalAlerts+=Number(r.alerts)||0;
    totalNewRecords+=Number(r.newHistoricalLow)||0;
    totalAtLows+=Number(r.atHistoricalLow)||0;
-   totalCandidates=Number(d.steamIndexHistoryCandidates)||totalCandidates;
+   totalCandidates=Math.max(totalCandidates,Number(d.steamIndexHistoryCandidates)||0);
    pending=Number(d.steamIndexHistoryPending)||0;
    const processed=Math.max(0,totalCandidates-pending);
    b.textContent=pending>0?"Revisando historiales… "+processed+"/"+totalCandidates:"Finalizando…";
    $("runResult").textContent=pending>0
-    ?"Revisión en progreso: "+processed+" de "+totalCandidates+" historiales consultados. Quedan "+pending+". No necesitas volver a pulsar el botón."
+    ?"Revisión en progreso: "+processed+" de "+totalCandidates+" historiales consultados. Quedan "+pending+". No necesitas volver a pulsar."
     :"Historiales completados. Preparando el resumen…";
-   if(pending>0) await new Promise(resolve=>setTimeout(resolve,13000));
+   if(pending>0) await new Promise(resolve=>setTimeout(resolve,25000));
   }while(pending>0);
   await api("/api/report",{method:"POST",body:JSON.stringify({
    wishlistGames,gamesChecked,historyRequests:totalHistoryRequests,
@@ -140,6 +157,7 @@ async function runNow(){
   $("runResult").textContent="La revisión se detuvo: "+e.message+" Puedes volver a pulsar para continuar desde el último lote.";
   toast(e.message);
  }finally{
+  isRunning=false;
   b.disabled=false;
   b.textContent="▶ Probar ahora";
  }
