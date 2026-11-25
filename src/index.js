@@ -246,9 +246,13 @@ async function runCheck(env, { manual = false } = {}) {
       : "mínimo histórico guardado por el monitor";
     const title = old?.title || steamPrice?.title || "Steam App " + appid;
 
+    // Solo notificamos mínimos cuando existe una oferta real.
+    // Guardamos por separado si ya se notificó un mínimo con descuento:
+    // un precio sin descuento no debe bloquear una alerta posterior.
+    const wasAtDiscountedLow = Boolean(old?.wasAtDiscountedLow);
     let type = null;
-    if (isNewRecord) type = "NUEVO MÍNIMO REGISTRADO";
-    else if (isAtLow && !old?.wasAtLow) type = "MÍNIMO HISTÓRICO REGISTRADO";
+    if (isDiscounted && isNewRecord) type = "NUEVO MÍNIMO REGISTRADO";
+    else if (isDiscounted && isAtLow && !wasAtDiscountedLow) type = "MÍNIMO HISTÓRICO REGISTRADO";
 
     if (type) {
       const defaultCover = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + appid + "/header.jpg";
@@ -281,6 +285,7 @@ async function runCheck(env, { manual = false } = {}) {
       lowAmount: nextLowAmount,
       lowCurrency: "MXN",
       wasAtLow: isAtLow,
+      wasAtDiscountedLow: isDiscounted && (isAtLow || isNewRecord),
       historyCheckedAt: steamIndexLows.has(key)
         ? new Date().toISOString()
         : (old?.historyCheckedAt || null),
