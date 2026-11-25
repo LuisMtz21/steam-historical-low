@@ -172,9 +172,10 @@ async function runCheck(env, { manual = false, reportManual = true } = {}) {
     );
     const isAtOrBelowOldLow = hasOldLow && currentAmount <= Number(old.lowAmount) + 0.000001;
     const lastHistoryCheck = Date.parse(old?.historyCheckedAt || "");
-    const retryMissingHistory = !hasOldLow &&
-      (!Number.isFinite(lastHistoryCheck) || Date.now() - lastHistoryCheck >= 24 * 60 * 60 * 1000);
-    return isAtOrBelowOldLow || retryMissingHistory;
+    const historyCheckDue = !Number.isFinite(lastHistoryCheck) ||
+      Date.now() - lastHistoryCheck >= 24 * 60 * 60 * 1000;
+    // Consultar historiales nuevos y volver a validar posibles récords como máximo cada 24 horas.
+    return historyCheckDue && (!hasOldLow || isAtOrBelowOldLow);
   });
 
   // Cloudflare Free permite 50 subrequests externos por ejecución.
@@ -304,7 +305,9 @@ async function runCheck(env, { manual = false, reportManual = true } = {}) {
       lowCurrency: "MXN",
       wasAtLow: isAtLow,
       wasAtDiscountedLow: isDiscounted && (isAtLow || isNewRecord),
-      historyCheckedAt: steamIndexLows.has(key)
+      // Marcar también los intentos sin historial disponible para que no se repitan
+      // indefinidamente y la revisión completa pueda avanzar al siguiente lote.
+      historyCheckedAt: historyBatchCandidates.includes(key)
         ? new Date().toISOString()
         : (old?.historyCheckedAt || null),
       checkedAt: new Date().toISOString()
