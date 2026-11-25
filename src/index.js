@@ -79,7 +79,12 @@ export default {
         return json({ ok: false, error: "Ruta no encontrada." }, 404);
       } catch (error) {
         console.error(error);
-        return json({ ok: false, error: error.message || "Error inesperado." }, 500);
+        const status = Number(error?.statusCode) || 500;
+        return json({
+          ok: false,
+          error: error.message || "Error inesperado.",
+          retryAfter: Number(error?.retryAfterSeconds) || null
+        }, status);
       }
     }
 
@@ -111,10 +116,13 @@ async function runCheck(env, { manual = false, reportManual = true } = {}) {
   }
   const lockKey = "run-lock-v1";
   const lockedAt = await env.KV.get(lockKey);
-  if (lockedAt && Date.now() - Date.parse(lockedAt) < 15 * 60 * 1000) {
+  const lockAge = lockedAt ? Date.now() - Date.parse(lockedAt) : Infinity;
+  if (lockedAt && Number.isFinite(lockAge) && lockAge < 45 * 1000) {
     return { skipped: true, reason: "Ya hay una revisión en curso." };
   }
-  await env.KV.put(lockKey, startedAt, { expirationTtl: 900 });
+  // Recuperar bloqueos abandonados; cada ejecución normal termina en pocos segundos.
+  if (lockedAt) await env.KV.delete(lockKey);
+  await env.KV.put(lockKey, startedAt, { expirationTtl: 45 });
   try {
   const wishlistUrl = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=${STEAM_ID}`;
   const wishlistResponse = await fetch(wishlistUrl, { signal: AbortSignal.timeout(20000) });
@@ -170,12 +178,15 @@ async function runCheck(env, { manual = false, reportManual = true } = {}) {
       Number.isFinite(Number(old.lowAmount)) &&
       old.lowCurrency === "MXN"
     );
-    const isAtOrBelowOldLow = hasOldLow && currentAmount <= Number(old.lowAmount) + 0.000001;
     const lastHistoryCheck = Date.parse(old?.historyCheckedAt || "");
     const historyCheckDue = !Number.isFinite(lastHistoryCheck) ||
       Date.now() - lastHistoryCheck >= 24 * 60 * 60 * 1000;
-    // Consultar historiales nuevos y volver a validar posibles récords como máximo cada 24 horas.
-    return historyCheckDue && (!hasOldLow || isAtOrBelowOldLow);
+    if (!hasOldLow) return historyCheckDue;
+    const isBelowOldLow = currentAmount < Number(old.lowAmount) - 0.000001;
+    const isAtOrBelowOldLow = currentAmount <= Number(old.lowAmount) + 0.000001;
+    // Un precio que rompe el mínimo se valida inmediatamente; un mínimo ya revisado
+    // solo se vuelve a consultar cada 24 horas para evitar repetir llamadas.
+    return isBelowOldLow || (isAtOrBelowOldLow && historyCheckDue);
   });
 
   // Cloudflare Free permite 50 subrequests externos por ejecución.
@@ -477,12 +488,11 @@ async function getSteamIndexHistoricalLow(appid, env) {
 
     if (response.status === 404) return null;
     if (response.status === 429) {
-      const retryAfter = Number(response.headers?.get("Retry-After")) || 60;
-      if (retryAfter > 90 || attempt === 2) {
-        throw new Error("Steam Index alcanzó su límite de solicitudes. Reintenta en " + retryAfter + " segundos.");
-      }
-      await new Promise(resolve => setTimeout(resolve, Math.max(1, retryAfter) * 1000));
-      continue;
+      const retryAfter = Math.max(5, Number(response.headers?.get("Retry-After")) || 60);
+      const error = new Error("Steam Index limitó temporalmente las consultas. Se reintentará en " + retryAfter + " segundos.");
+      error.statusCode = 429;
+      error.retryAfterSeconds = retryAfter;
+      throw error;
     }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 500);
