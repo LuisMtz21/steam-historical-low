@@ -72,7 +72,7 @@ export default {
             `Nuevos récords: ${Number(body.newRecords) || 0}`,
             `Mínimos alcanzados: ${Number(body.atLows) || 0}`,
             "Precios comparados exclusivamente en Steam México (MXN)."
-          ].join("\\n"));
+          ].join("\n"));
           return json({ ok: true });
         }
 
